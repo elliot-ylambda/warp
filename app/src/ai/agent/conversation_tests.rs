@@ -98,6 +98,44 @@ fn latest_user_query_returns_latest_non_empty_user_query() {
 }
 
 #[test]
+fn streamed_byok_custom_slug_survives_conversation_usage_ingestion() {
+    const CUSTOM_SLUG: &str = "custom-model-slug";
+
+    let mut conversation = AIConversation::new(false, false);
+    let usage_metadata = api::response_event::stream_finished::ConversationUsageMetadata {
+        context_window_usage: 0.0,
+        summarized: false,
+        credits_spent: 0.0,
+        tool_usage_metadata: None,
+        warp_token_usage: HashMap::new(),
+        byok_token_usage: HashMap::from([(
+            CUSTOM_SLUG.to_string(),
+            api::response_event::stream_finished::ModelTokenUsage {
+                total_tokens: 17,
+                token_usage_by_category: HashMap::from([("primary_agent".to_string(), 17)]),
+                ..Default::default()
+            },
+        )]),
+        ..Default::default()
+    };
+
+    conversation
+        .update_cost_and_usage_for_request(None, vec![], Some(usage_metadata), false)
+        .unwrap();
+
+    let token_usage = conversation.token_usage();
+    assert_eq!(token_usage.len(), 1);
+    assert_eq!(token_usage[0].model_id, CUSTOM_SLUG);
+    assert_eq!(token_usage[0].byok_tokens, 17);
+    assert_eq!(
+        token_usage[0]
+            .byok_token_usage_by_category
+            .get("primary_agent"),
+        Some(&17)
+    );
+}
+
+#[test]
 fn latest_user_query_trims_and_skips_empty_queries() {
     let conversation = restored_conversation_with_queries(&["  write unit tests  ", "  "]);
 

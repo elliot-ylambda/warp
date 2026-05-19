@@ -120,6 +120,31 @@ fn toggle_details_expanded_flips_state_and_resets_show_all_on_collapse() {
 }
 
 #[test]
+fn collect_models_by_category_keeps_slug_shaped_byok_model_labels() {
+    const CUSTOM_SLUG: &str = "custom-model-slug";
+
+    let mut usage_info = placeholder_usage_info();
+    usage_info.models = vec![ModelTokenUsage {
+        model_id: CUSTOM_SLUG.to_string(),
+        byok_tokens: 17,
+        byok_token_usage_by_category: HashMap::from([(PRIMARY_AGENT_CATEGORY.to_string(), 17)]),
+        ..Default::default()
+    }];
+    let view = ConversationUsageView::new(
+        usage_info,
+        DisplayMode::Footer,
+        None,
+        MouseStateHandle::default(),
+    );
+
+    assert_eq!(
+        view.collect_models_by_category()
+            .get(PRIMARY_AGENT_CATEGORY),
+        Some(&vec![(CUSTOM_SLUG.to_string(), true)])
+    );
+}
+
+#[test]
 fn show_all_agent_rows_is_independent_of_details_expanded() {
     App::test((), |mut app| async move {
         initialize_test_app(&mut app);

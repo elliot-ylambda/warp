@@ -1747,6 +1747,18 @@ impl AIConversation {
             self.conversation_usage_metadata.context_window_usage =
                 usage_metadata.context_window_usage;
             self.conversation_usage_metadata.credits_spent = usage_metadata.credits_spent;
+            let mut expected_warp_model_labels = usage_metadata
+                .warp_token_usage
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            expected_warp_model_labels.sort();
+            let mut expected_byok_model_labels = usage_metadata
+                .byok_token_usage
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            expected_byok_model_labels.sort();
 
             let mut token_usage: HashMap<_, ModelTokenUsage> = HashMap::new();
             for (model_id, usage) in usage_metadata.warp_token_usage {
@@ -1777,6 +1789,16 @@ impl AIConversation {
                     usage
                 })
                 .collect();
+            let mut actual_model_labels = self
+                .conversation_usage_metadata
+                .token_usage
+                .iter()
+                .map(|usage| usage.model_id.clone())
+                .collect::<Vec<_>>();
+            actual_model_labels.sort();
+            log::debug!(
+                "AIConversation::update_cost_and_usage_for_request preserved streamed model labels expected_warp_model_labels={expected_warp_model_labels:?} expected_byok_model_labels={expected_byok_model_labels:?} actual_model_labels={actual_model_labels:?}"
+            );
 
             self.conversation_usage_metadata.tool_usage_metadata = usage_metadata
                 .tool_usage_metadata
