@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use warpui::{
     elements::ChildView, ui_components::components::UiComponentStyles, AppContext, Element, Entity,
-    TypedActionView, View, ViewContext, ViewHandle,
+    FocusContext, TypedActionView, View, ViewContext, ViewHandle,
 };
 
 use crate::{
@@ -253,13 +253,6 @@ impl BranchPicker {
         self.fetch_branches(new_cwd, ctx);
     }
 
-    pub fn toggle_dropdown(&mut self, ctx: &mut ViewContext<Self>) -> bool {
-        self.dropdown.update(ctx, |dropdown, ctx| {
-            dropdown.toggle_expanded(ctx);
-        });
-        self.dropdown.as_ref(ctx).is_expanded()
-    }
-
     pub fn selected_value(&self, app: &AppContext) -> Option<String> {
         // While loading, the dropdown shows a placeholder label
         // ("Fetching branches…") that must not be treated as a real
@@ -283,6 +276,11 @@ impl Entity for BranchPicker {
 impl View for BranchPicker {
     fn ui_name() -> &'static str {
         "BranchPicker"
+    }
+    fn on_focus(&mut self, focus_ctx: &FocusContext, ctx: &mut ViewContext<Self>) {
+        if focus_ctx.is_self_focused() {
+            ctx.focus(&self.dropdown);
+        }
     }
 
     fn render(&self, _app: &AppContext) -> Box<dyn Element> {

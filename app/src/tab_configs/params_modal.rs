@@ -42,18 +42,13 @@ pub fn init(app: &mut AppContext) {
             TabConfigParamsModalAction::Escape,
             id!("TabConfigParamsModal"),
         ),
-        // Enter and Space only fire when no EditorView descendant is focused.
-        // When a text field or picker filter editor has focus, the editor
-        // consumes these keys and the modal handles them via event
-        // subscriptions instead (see handle_editor_event).
+        // Enter only fires when no EditorView descendant is focused. When a
+        // text field or picker filter editor has focus, the editor consumes
+        // Enter and the modal handles it via event subscriptions instead (see
+        // handle_editor_event).
         FixedBinding::new(
             "enter",
             TabConfigParamsModalAction::Submit,
-            id!("TabConfigParamsModal") & !id!("EditorView"),
-        ),
-        FixedBinding::new(
-            "space",
-            TabConfigParamsModalAction::ToggleDropdown,
             id!("TabConfigParamsModal") & !id!("EditorView"),
         ),
     ]);
@@ -149,7 +144,6 @@ pub enum TabConfigParamsModalAction {
     Cancel,
     Submit,
     Escape,
-    ToggleDropdown,
 }
 
 impl TabConfigParamsModal {
@@ -324,11 +318,9 @@ impl TabConfigParamsModal {
 
         self.pending_config = Some(config);
 
-        // When the only fields are dropdowns, focus the modal itself so
-        // Enter (submit) and Space (toggle dropdown) fixed bindings fire.
-        // When there are text fields, focus the first one so the user can
-        // start typing immediately.
-        if self.has_text_fields() {
+        // Focus the first field so text inputs can receive typing immediately
+        // and dropdown-only configs leave focus on their picker trigger.
+        if !self.param_fields.is_empty() {
             self.focus_field(0, ctx);
         } else {
             ctx.focus_self();
@@ -388,50 +380,14 @@ impl TabConfigParamsModal {
         ctx.notify();
     }
 
-    /// Restores focus to the modal itself (dropdown-only) or the first text
-    /// field after a picker interaction closes its dropdown.
+    /// Restores focus to the first field after a picker interaction closes its dropdown.
     fn reclaim_focus(&self, ctx: &mut ViewContext<Self>) {
-        if self.has_text_fields() {
+        if !self.param_fields.is_empty() {
             self.focus_field(0, ctx);
         } else {
             ctx.focus_self();
         }
         ctx.notify();
-    }
-
-    fn has_text_fields(&self) -> bool {
-        self.param_fields
-            .iter()
-            .any(|(_, _, field)| matches!(field, ParamField::Text(_)))
-    }
-
-    fn dropdown_count(&self) -> usize {
-        self.param_fields
-            .iter()
-            .filter(|(_, _, field)| !matches!(field, ParamField::Text(_)))
-            .count()
-    }
-
-    fn toggle_single_dropdown(&mut self, ctx: &mut ViewContext<Self>) {
-        let mut opened = false;
-        for (_, _, field) in &self.param_fields {
-            match field {
-                ParamField::Branch { picker, .. } => {
-                    opened = picker.update(ctx, |p, ctx| p.toggle_dropdown(ctx));
-                    break;
-                }
-                ParamField::Repo { picker, .. } => {
-                    opened = picker.update(ctx, |p, ctx| p.toggle_dropdown(ctx));
-                    break;
-                }
-                ParamField::Text(_) => {}
-            }
-        }
-        // When the dropdown just closed, reclaim focus so Enter/Space
-        // fixed bindings continue to work.
-        if !opened && !self.has_text_fields() {
-            ctx.focus_self();
-        }
     }
 
     fn focus_field(&self, index: usize, ctx: &mut ViewContext<Self>) {
@@ -504,13 +460,10 @@ impl View for TabConfigParamsModal {
     }
 
     fn on_focus(&mut self, focus_ctx: &FocusContext, ctx: &mut ViewContext<Self>) {
-        // When focus arrives directly at this view (not at a child), keep
-        // self-focus so the Enter/Space fixed bindings fire. This happens
-        // on initial open (via focus_self in on_open) and when the Modal
-        // wrapper re-focuses the body after a child (like a dropdown)
-        // releases focus.
-        if focus_ctx.is_self_focused() && !self.has_text_fields() {
-            ctx.focus_self();
+        // The Modal wrapper can re-focus the body after a child releases
+        // focus. Redirect that self-focus to the first actual input.
+        if focus_ctx.is_self_focused() && !self.param_fields.is_empty() {
+            self.focus_field(0, ctx);
         }
     }
 
@@ -729,11 +682,6 @@ impl TypedActionView for TabConfigParamsModal {
                 ctx.emit(TabConfigParamsModalEvent::Close);
             }
             TabConfigParamsModalAction::Submit => self.try_submit(ctx),
-            TabConfigParamsModalAction::ToggleDropdown => {
-                if self.dropdown_count() <= 1 {
-                    self.toggle_single_dropdown(ctx);
-                }
-            }
         }
     }
 }

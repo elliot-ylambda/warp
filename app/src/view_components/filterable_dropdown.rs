@@ -15,9 +15,10 @@ use warp_editor::editor::NavigationKey;
 use warpui::{
     elements::{
         Align, Border, ChildAnchor, ChildView, Clipped, ConstrainedBox, Container, CornerRadius,
-        CrossAxisAlignment, Dismiss, Element, EventHandler, Flex, MainAxisAlignment, MainAxisSize,
-        MouseStateHandle, OffsetPositioning, ParentElement, PositionedElementAnchor,
-        PositionedElementOffsetBounds, Radius, SavePosition, Shrinkable, Stack,
+        CrossAxisAlignment, Dismiss, DispatchEventResult, Element, EventHandler, Flex,
+        MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning, ParentElement,
+        PositionedElementAnchor, PositionedElementOffsetBounds, Radius, SavePosition, Shrinkable,
+        Stack,
     },
     geometry::vector::vec2f,
     ui_components::{
@@ -381,7 +382,11 @@ where
     }
 
     fn focus(&mut self, _delta: usize, ctx: &mut ViewContext<Self>) {
-        ctx.focus(&self.filter_editor);
+        if self.is_expanded {
+            ctx.focus(&self.filter_editor);
+        } else {
+            ctx.focus_self();
+        }
         ctx.notify();
     }
 
@@ -486,12 +491,27 @@ where
                 top_bar.with_style(UiComponentStyles::default().set_font_family_id(font_family_id))
         }
 
-        top_bar
+        let top_bar = top_bar
             .build()
             .on_click(|ctx, _, _| {
                 ctx.dispatch_typed_action(DropdownAction::<A>::ToggleExpanded);
             })
-            .finish()
+            .finish();
+
+        if self.disabled {
+            top_bar
+        } else {
+            EventHandler::new(top_bar)
+                .on_keydown(|ctx, _, keystroke| {
+                    if keystroke.is_unmodified_key(" ") {
+                        ctx.dispatch_typed_action(DropdownAction::<A>::ToggleExpanded);
+                        DispatchEventResult::StopPropagation
+                    } else {
+                        DispatchEventResult::PropagateToParent
+                    }
+                })
+                .finish()
+        }
     }
 
     fn render_filter_input(&self, appearance: &Appearance) -> Box<dyn Element> {
@@ -737,8 +757,8 @@ where
     }
 
     fn on_focus(&mut self, focus_ctx: &FocusContext, ctx: &mut ViewContext<Self>) {
-        if focus_ctx.is_self_focused() {
-            self.focus(0, ctx)
+        if focus_ctx.is_self_focused() && self.is_expanded {
+            self.focus(0, ctx);
         }
     }
 
@@ -786,7 +806,7 @@ where
     }
 
     fn on_blur(&mut self, blur_ctx: &BlurContext, ctx: &mut ViewContext<Self>) {
-        if blur_ctx.is_self_blurred() {
+        if blur_ctx.is_self_blurred() && !self.is_expanded {
             ctx.emit(FilterableDropdownEvent::Close);
         }
     }
