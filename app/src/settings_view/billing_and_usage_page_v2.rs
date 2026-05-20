@@ -244,9 +244,6 @@ impl ClassifiedGrants {
             if grant.expiration.is_some_and(|exp| now >= exp) {
                 continue;
             }
-            if grant.request_credits_remaining <= 0 {
-                continue;
-            }
             let in_user_scope = grant.scope == BonusGrantScope::User;
             let in_workspace_scope =
                 workspace_uid.is_some_and(|uid| grant.scope == BonusGrantScope::Workspace(uid));
