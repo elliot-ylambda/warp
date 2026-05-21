@@ -656,10 +656,7 @@ impl BlocklistAIInputModel {
                 .into_iter()
                 .flatten()
                 .filter_map(|entry| {
-                    if entry
-                        .exit_code
-                        .is_some_and(|code| code.was_command_not_found())
-                    {
+                    if entry.exit_code.is_some_and(|code| !code.was_successful()) {
                         return None;
                     }
                     Some(entry.command.to_string())
