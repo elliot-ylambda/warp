@@ -155,62 +155,10 @@ impl LocalControlBridge {
                     "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
                 }),
             ),
-            ActionKind::AppInspect => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "pid": std::process::id(),
-                    "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
-                    "channel": ChannelState::channel().to_string(),
-                    "app_id": ChannelState::app_id().to_string(),
-                    "app_version": ChannelState::app_version(),
-                    "window_count": ctx.window_ids().count(),
-                    "has_active_window": ctx.windows().active_window().is_some(),
-                }),
-            ),
-            ActionKind::AppVersion => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "channel": ChannelState::channel().to_string(),
-                    "app_id": ChannelState::app_id().to_string(),
-                    "app_version": ChannelState::app_version(),
-                    "protocol_version": PROTOCOL_VERSION,
-                }),
-            ),
-            ActionKind::AppActive => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
-                    "window_count": ctx.window_ids().count(),
-                    "has_active_window": ctx.windows().active_window().is_some(),
-                }),
-            ),
-            ActionKind::WindowList => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "window_count": ctx.window_ids().count(),
-                    "has_active_window": ctx.windows().active_window().is_some(),
-                }),
-            ),
-            ActionKind::TabList | ActionKind::PaneList | ActionKind::SessionList => {
-                ResponseEnvelope::ok(
-                    request.request_id,
-                    json!({
-                        "items": [],
-                        "enumeration": "not_yet_implemented",
-                    }),
-                )
-            }
             ActionKind::TabCreate => match self.create_terminal_tab(&request.target, ctx) {
                 Ok(data) => ResponseEnvelope::ok(request.request_id, data),
                 Err(error) => ResponseEnvelope::error(request.request_id, error),
             },
-            ActionKind::SettingList => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "settings": [],
-                    "enumeration": "not_yet_implemented",
-                }),
-            ),
             action => ResponseEnvelope::error(
                 request.request_id,
                 ControlError::new(
@@ -230,23 +178,19 @@ impl LocalControlBridge {
         ctx: &mut ModelContext<Self>,
     ) -> Result<serde_json::Value, ControlError> {
         validate_tab_create_target(target)?;
-        let window_id = ctx
-            .windows()
-            .active_window()
-            .or_else(|| ctx.windows().ordered_window_ids().into_iter().next())
-            .ok_or_else(|| {
-                ControlError::new(
-                    ErrorCode::InvalidSelector,
-                    "tab.create requires at least one open Warp window",
-                )
-            })?;
+        let window_id = ctx.windows().active_window().ok_or_else(|| {
+            ControlError::new(
+                ErrorCode::MissingTarget,
+                "tab.create requires an active Warp window",
+            )
+        })?;
         let workspace = ctx
             .views_of_type::<Workspace>(window_id)
             .and_then(|workspaces| workspaces.into_iter().next())
             .ok_or_else(|| {
                 ControlError::new(
-                    ErrorCode::InvalidSelector,
-                    "tab.create could not resolve an active workspace",
+                    ErrorCode::MissingTarget,
+                    "tab.create requires an active workspace in the active window",
                 )
             })?;
         let (previous_tab_count, tab_count, active_tab_index) =
@@ -355,56 +299,7 @@ fn validate_tab_create_target(target: &TargetSelector) -> Result<(), ControlErro
 }
 
 fn capabilities() -> Vec<ActionKind> {
-    vec![
-        ActionKind::AppPing,
-        ActionKind::AppInspect,
-        ActionKind::AppVersion,
-        ActionKind::AppActive,
-        ActionKind::AppFocus,
-        ActionKind::AppSettingsOpen,
-        ActionKind::AppCommandPaletteOpen,
-        ActionKind::AppCommandSearchOpen,
-        ActionKind::AppWarpDriveOpen,
-        ActionKind::AppWarpDriveToggle,
-        ActionKind::AppResourceCenterToggle,
-        ActionKind::AppAiAssistantToggle,
-        ActionKind::AppCodeReviewToggle,
-        ActionKind::AppVerticalTabsToggle,
-        ActionKind::WindowList,
-        ActionKind::WindowCreate,
-        ActionKind::WindowFocus,
-        ActionKind::WindowClose,
-        ActionKind::TabList,
-        ActionKind::TabCreate,
-        ActionKind::TabActivate,
-        ActionKind::TabMove,
-        ActionKind::TabRename,
-        ActionKind::TabClose,
-        ActionKind::PaneList,
-        ActionKind::PaneSplit,
-        ActionKind::PaneFocus,
-        ActionKind::PaneNavigate,
-        ActionKind::PaneClose,
-        ActionKind::PaneMaximize,
-        ActionKind::PaneResize,
-        ActionKind::PaneSessionPrevious,
-        ActionKind::PaneSessionNext,
-        ActionKind::SessionList,
-        ActionKind::InputInsert,
-        ActionKind::InputReplace,
-        ActionKind::InputClear,
-        ActionKind::InputModeSet,
-        ActionKind::ThemeList,
-        ActionKind::ThemeSet,
-        ActionKind::AppearanceGet,
-        ActionKind::AppearanceSet,
-        ActionKind::AppearanceFontSize,
-        ActionKind::AppearanceZoom,
-        ActionKind::SettingGet,
-        ActionKind::SettingList,
-        ActionKind::SettingSet,
-        ActionKind::SettingToggle,
-    ]
+    vec![ActionKind::AppPing, ActionKind::TabCreate]
 }
 
 #[cfg(test)]

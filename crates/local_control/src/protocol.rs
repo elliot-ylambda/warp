@@ -329,6 +329,7 @@ pub enum ErrorCode {
     ProtocolVersionUnsupported,
     InvalidRequest,
     InvalidSelector,
+    MissingTarget,
     InstanceNotFound,
     AmbiguousSelector,
     TransportUnavailable,
