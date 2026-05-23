@@ -1,0 +1,5 @@
+{
+  "branch_name": "oz-agent/spec-issue-9576",
+  "pr_title": "feat: show current zoom level while zooming",
+  "pr_summary": "Closes #9576\n\n## Summary\n- Add a transient top-centered workspace HUD showing the current UI zoom percentage after zoom in, zoom out, and reset actions.\n- Share zoom stepping logic with tests so min/max clamps still report the current clamped value and invalid stored zoom values do not show the HUD.\n- Apply zoom factor changes from workspace window-settings updates so keybinding-driven zoom changes take effect immediately.\n\n## Validation\n- `cargo test --manifest-path /workspace/warp/Cargo.toml -p warp adjusted_zoom_level`\n- `cargo fmt --manifest-path /workspace/warp/Cargo.toml -- app/src/workspace/view.rs app/src/workspace/view/zoom_level_hud.rs` could not run because `cargo-fmt`/`rustfmt` is not installed in this environment.\n"
+}

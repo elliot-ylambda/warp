@@ -18,12 +18,14 @@ mod tests;
 mod vertical_tabs;
 #[cfg(target_family = "wasm")]
 mod wasm_view;
+mod zoom_level_hud;
 
 use self::vertical_tabs::telemetry::{VerticalTabsDisplayOption, VerticalTabsTelemetryEvent};
 use self::vertical_tabs::{
     render_detail_sidecar, render_settings_popup, VerticalTabsPanelState,
     VERTICAL_TABS_SETTINGS_BUTTON_POSITION_ID,
 };
+use self::zoom_level_hud::{adjusted_zoom_level, ZoomLevelHud};
 pub(crate) use onboarding::OnboardingTutorial;
 
 use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
@@ -978,6 +980,7 @@ pub struct Workspace {
     toast_stack: ViewHandle<DismissibleToastStack<WorkspaceAction>>,
     agent_toast_stack: ViewHandle<AgentToastStack>,
     update_toast_stack: ViewHandle<DismissibleToastStack<WorkspaceAction>>,
+    zoom_level_hud: ViewHandle<ZoomLevelHud>,
     /// We need to render some dynamic keybindings for our tooltips. These cannot be looked up in the
     /// render method, so look them up when the view is constructed and cache them here. Note that they
     /// need to be kept in sync as the keybindings change.
@@ -2887,6 +2890,7 @@ impl Workspace {
 
         let update_toast_stack =
             ctx.add_typed_action_view(|_| DismissibleToastStack::new(Duration::from_secs(4)));
+        let zoom_level_hud = ctx.add_view(|_| ZoomLevelHud::new());
 
         #[cfg(target_family = "wasm")]
         let wasm_nux_dialog = Self::build_wasm_nux_dialog(ctx);
@@ -3102,6 +3106,7 @@ impl Workspace {
             toast_stack,
             agent_toast_stack,
             update_toast_stack,
+            zoom_level_hud,
             cached_keybindings,
             prompt_editor_modal,
             agent_toolbar_editor_modal,
@@ -15073,6 +15078,8 @@ impl Workspace {
                 }
             }
             WindowSettingsChangedEvent::ZoomLevel { .. } => {
+                let zoom_factor = WindowSettings::as_ref(ctx).zoom_level.as_zoom_factor();
+                ctx.set_zoom_factor(zoom_factor);
                 self.update_titlebar_height(ctx);
             }
             _ => {}
@@ -15665,33 +15672,32 @@ impl Workspace {
     }
 
     fn reset_zoom(&mut self, ctx: &mut ViewContext<Self>) {
+        let default_zoom = ZoomLevel::default_value();
         WindowSettings::handle(ctx).update(ctx, |window_settings, ctx| {
             report_if_error!(window_settings
                 .zoom_level
-                .set_value(ZoomLevel::default_value(), ctx));
+                .set_value(default_zoom, ctx));
         });
+        self.show_zoom_level_hud(default_zoom, ctx);
     }
 
     fn adjust_zoom(&mut self, increase: bool, ctx: &mut ViewContext<Self>) {
         let current_zoom = *WindowSettings::as_ref(ctx).zoom_level.value();
-        let Some(current_index) = crate::window_settings::ZoomLevel::VALUES
-            .iter()
-            .position(|zoom| *zoom == current_zoom)
-        else {
+        let Some(next_zoom) = adjusted_zoom_level(current_zoom, increase) else {
             return;
-        };
-
-        let next_index = if increase {
-            (current_index + 1).min(crate::window_settings::ZoomLevel::VALUES.len() - 1)
-        } else {
-            current_index.saturating_sub(1)
         };
 
         WindowSettings::handle(ctx).update(ctx, |window_settings, ctx| {
             report_if_error!(window_settings
                 .zoom_level
-                .set_value(crate::window_settings::ZoomLevel::VALUES[next_index], ctx));
+                .set_value(next_zoom, ctx));
         });
+        self.show_zoom_level_hud(next_zoom, ctx);
+    }
+
+    fn show_zoom_level_hud(&mut self, zoom_level: u16, ctx: &mut ViewContext<Self>) {
+        self.zoom_level_hud
+            .update(ctx, |hud, ctx| hud.show_zoom_level(zoom_level, ctx));
     }
 
     fn adjust_terminal_font_size(&mut self, font_size_delta: f32, ctx: &mut ViewContext<Self>) {
@@ -19050,6 +19056,17 @@ impl Workspace {
     /// Offset positioning for global toasts.
     // TODO: update positioning based on input mode.
     fn global_toast_positioning(&self) -> OffsetPositioning {
+        OffsetPositioning::offset_from_save_position_element(
+            TAB_CONTENT_POSITION_ID,
+            vec2f(0., 16.),
+            PositionedElementOffsetBounds::WindowByPosition,
+            PositionedElementAnchor::TopMiddle,
+            ChildAnchor::TopMiddle,
+        )
+    }
+
+    /// Offset positioning for the zoom-level HUD.
+    fn zoom_level_hud_positioning(&self) -> OffsetPositioning {
         OffsetPositioning::offset_from_save_position_element(
             TAB_CONTENT_POSITION_ID,
             vec2f(0., 16.),
@@ -22881,6 +22898,11 @@ impl View for Workspace {
         stack.add_positioned_overlay_child(
             ChildView::new(&self.toast_stack).finish(),
             self.global_toast_positioning(),
+        );
+
+        stack.add_positioned_overlay_child(
+            ChildView::new(&self.zoom_level_hud).finish(),
+            self.zoom_level_hud_positioning(),
         );
 
         // Render agent toast stack (for agent-related notifications) if popup is not open
