@@ -77,7 +77,6 @@ fn terminal_data_and_drive_content_reads_use_underlying_data_permission() {
         ActionKind::BlockGet,
         ActionKind::InputGet,
         ActionKind::HistoryList,
-        ActionKind::DriveGet,
     ] {
         let metadata = action.metadata();
         assert_eq!(
@@ -95,11 +94,31 @@ fn terminal_data_and_drive_content_reads_use_underlying_data_permission() {
         );
         assert!(metadata.authenticated_user.required);
     }
+
+    let metadata = ActionKind::DriveGet.metadata();
+    assert_eq!(
+        metadata.implementation_status,
+        ActionImplementationStatus::Implemented
+    );
+    assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyTerminalData);
+    assert_eq!(
+        metadata.state_data_category,
+        StateDataCategory::UnderlyingDataRead
+    );
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::ReadUnderlyingData
+    );
+    assert!(metadata.authenticated_user.required);
 }
 
 #[test]
 fn drive_list_is_authenticated_metadata_read() {
     let metadata = ActionKind::DriveList.metadata();
+    assert_eq!(
+        metadata.implementation_status,
+        ActionImplementationStatus::Implemented
+    );
     assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyMetadata);
     assert_eq!(
         metadata.permission_category,

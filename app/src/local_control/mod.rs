@@ -1,5 +1,12 @@
+use crate::auth::AuthStateProvider;
+use crate::cloud_object::{
+    model::persistence::CloudModel, CloudObject, GenericStringObjectFormat, JsonObjectType,
+    ObjectType,
+};
 use crate::code::view::CodeView;
+use crate::env_vars::CloudEnvVarCollection;
 use crate::features::FeatureFlag;
+use crate::notebooks::CloudNotebook;
 use crate::projects::ProjectManagementModel;
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
@@ -9,11 +16,14 @@ use crate::settings::{
     LocalControlInvocationContext, LocalControlPermissionCategory, LocalControlSettings,
 };
 use crate::terminal::view::TerminalView;
+use crate::workflows::CloudWorkflow;
 use crate::workspace::ActiveSession;
 use ::local_control::auth::{CredentialGrant, CredentialRequest, ScopedCredential};
 use ::local_control::protocol::{
-    ActionGetParams, FileListResult, FileSummary, PaneTarget, ProjectActiveResult,
-    ProjectListResult, ProjectSummary, TabTarget, TargetSelector, WindowTarget,
+    ActionGetParams, DriveGetParams, DriveGetResult, DriveListParams, DriveListResult,
+    DriveObjectSummary, DriveObjectType as ControlDriveObjectType, DriveTarget, FileListResult,
+    FileSummary, PaneTarget, ProjectActiveResult, ProjectListResult, ProjectSummary, TabTarget,
+    TargetSelector, WindowTarget,
 };
 use ::local_control::{
     ActionKind, AuthToken, ControlEndpoint, ControlError, ControlResponse, ErrorCode,
@@ -299,6 +309,34 @@ impl LocalControlBridge {
                     Err(error) => ResponseEnvelope::error(request.request_id, error),
                 }
             }
+            ActionKind::DriveList => {
+                if let Err(error) = ensure_authenticated_user_matches(&grant, ctx) {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                match self.list_drive_objects(&request, ctx) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
+            ActionKind::DriveGet => {
+                if let Err(error) = ensure_authenticated_user_matches(&grant, ctx) {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                match self.get_drive_object(&request, ctx) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
             action => ResponseEnvelope::error(
                 request.request_id,
                 ControlError::new(
@@ -391,6 +429,59 @@ impl LocalControlBridge {
             projects: project_summaries(ctx),
         })
     }
+
+    fn list_drive_objects(
+        &mut self,
+        request: &RequestEnvelope,
+        ctx: &mut ModelContext<Self>,
+    ) -> Result<serde_json::Value, ControlError> {
+        validate_drive_target(&request.target, request.action.kind)?;
+        let params = request.action.params_as::<DriveListParams>()?;
+        let cloud_model = CloudModel::as_ref(ctx);
+        let mut objects = cloud_model
+            .cloud_objects()
+            .filter_map(|object| drive_object_summary(object.as_ref()))
+            .filter(|summary| {
+                params
+                    .object_type
+                    .is_none_or(|object_type| summary.object_type == object_type)
+            })
+            .collect::<Vec<_>>();
+        objects.sort_by(|a, b| {
+            drive_object_type_rank(a.object_type)
+                .cmp(&drive_object_type_rank(b.object_type))
+                .then_with(|| a.name.cmp(&b.name))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        serde_json::to_value(DriveListResult { objects }).map_err(json_response_error)
+    }
+
+    fn get_drive_object(
+        &mut self,
+        request: &RequestEnvelope,
+        ctx: &mut ModelContext<Self>,
+    ) -> Result<serde_json::Value, ControlError> {
+        validate_drive_target(&request.target, request.action.kind)?;
+        let params = request.action.params_as::<DriveGetParams>()?;
+        if let Some(DriveTarget::Id { object_type, id }) = request.target.drive.as_ref() {
+            if *object_type != params.object_type || id.0 != params.id {
+                return Err(ControlError::new(
+                    ErrorCode::TargetStateConflict,
+                    "drive.get target selector does not match the requested Drive object",
+                ));
+            }
+        }
+        let cloud_model = CloudModel::as_ref(ctx);
+        let object = cloud_model.get_by_uid(&params.id).ok_or_else(|| {
+            ControlError::new(
+                ErrorCode::StaleTarget,
+                "drive.get could not resolve the requested Drive object id",
+            )
+        })?;
+        drive_object_get_result(object, params.object_type)
+            .and_then(|result| serde_json::to_value(result).map_err(json_response_error))
+    }
+
     fn instance_metadata(&self) -> serde_json::Value {
         json!({
             "action": ActionKind::InstanceList.as_str(),
@@ -534,16 +625,19 @@ async fn handle_credential_request(
         )
             .into_response();
     }
-    let settings_check = state
+    let authorization_check = state
         .bridge_spawner
         .spawn({
             let action = request.action;
             let invocation_context = request.invocation_context;
-            move |_, ctx| ensure_action_allowed(invocation_context, action, ctx)
+            move |_, ctx| {
+                ensure_action_allowed(invocation_context, action, ctx)?;
+                authenticated_user_subject_for_action(action, ctx)
+            }
         })
         .await;
-    match settings_check {
-        Ok(Ok(())) => {}
+    let authenticated_subject = match authorization_check {
+        Ok(Ok(subject)) => subject,
         Ok(Err(error)) => {
             return (
                 StatusCode::FORBIDDEN,
@@ -561,14 +655,15 @@ async fn handle_credential_request(
             )
                 .into_response();
         }
-    }
+    };
     let auth_token = AuthToken::generate();
-    let grant = CredentialGrant::new(
+    let mut grant = CredentialGrant::new(
         state.instance_id.clone(),
         request.action,
         request.invocation_context,
         Duration::minutes(5),
     );
+    grant.authenticated_user.subject = authenticated_subject;
     let mut credentials = match state.credentials.lock() {
         Ok(credentials) => credentials,
         Err(_) => {
@@ -674,6 +769,47 @@ async fn handle_control_request(
     (status, Json(response)).into_response()
 }
 
+fn validate_drive_target(target: &TargetSelector, action: ActionKind) -> Result<(), ControlError> {
+    if target.window.is_some()
+        || target.tab.is_some()
+        || target.pane.is_some()
+        || target.session.is_some()
+        || target.block.is_some()
+        || target.file.is_some()
+    {
+        return Err(ControlError::new(
+            ErrorCode::InvalidSelector,
+            format!(
+                "{} does not accept window, tab, pane, session, block, or file selectors",
+                action.as_str()
+            ),
+        ));
+    }
+    match (action, target.drive.as_ref()) {
+        (ActionKind::DriveList, None) | (ActionKind::DriveGet, None) => Ok(()),
+        (ActionKind::DriveGet, Some(DriveTarget::Id { id, .. })) => {
+            if id.0.is_empty() {
+                return Err(ControlError::new(
+                    ErrorCode::InvalidSelector,
+                    "drive.get requires a non-empty Drive object id selector",
+                ));
+            }
+            Ok(())
+        }
+        (_, Some(DriveTarget::Name { .. })) => Err(ControlError::new(
+            ErrorCode::UnsupportedAction,
+            format!(
+                "{} does not support Drive name selectors yet",
+                action.as_str()
+            ),
+        )),
+        _ => Err(ControlError::new(
+            ErrorCode::InvalidSelector,
+            format!("{} does not accept a Drive selector", action.as_str()),
+        )),
+    }
+}
+
 fn validate_tab_create_target(target: &TargetSelector) -> Result<(), ControlError> {
     if matches!(target.window.as_ref(), Some(WindowTarget::Id { .. })) {
         return Err(ControlError::new(
@@ -746,6 +882,7 @@ fn validate_instance_metadata_read_target(
     }
     Ok(())
 }
+
 fn validate_action_params(action: &::local_control::Action) -> Result<(), ControlError> {
     match action.kind {
         ActionKind::ActionGet => {
@@ -759,6 +896,16 @@ fn validate_action_params(action: &::local_control::Action) -> Result<(), Contro
         | ActionKind::FileList
         | ActionKind::ProjectActive
         | ActionKind::ProjectList => validate_empty_action_params(action),
+        ActionKind::DriveList => action.params_as::<DriveListParams>().map(|_| ()),
+        ActionKind::DriveGet => action.params_as::<DriveGetParams>().and_then(|params| {
+            if params.id.is_empty() {
+                return Err(ControlError::new(
+                    ErrorCode::InvalidParams,
+                    "drive.get requires a non-empty Drive object id",
+                ));
+            }
+            Ok(())
+        }),
         _ => Ok(()),
     }
 }
@@ -918,8 +1065,8 @@ fn outside_warp_any_implemented_action_enabled(ctx: &ModelContext<LocalControlSe
             outside_warp_permission_enabled_for_settings(settings, metadata.permission_category)
         })
 }
-#[cfg(test)]
 
+#[cfg(test)]
 fn outside_warp_action_enabled_for_settings(
     settings: &LocalControlSettings,
     action: ActionKind,
@@ -999,6 +1146,161 @@ fn ensure_settings_allow_action(
         ));
     }
     Ok(())
+}
+
+fn authenticated_user_subject_for_action(
+    action: ActionKind,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<Option<String>, ControlError> {
+    if !action.metadata().requires_authenticated_user {
+        return Ok(None);
+    }
+    authenticated_user_subject(ctx).map(Some)
+}
+
+fn ensure_authenticated_user_matches(
+    grant: &CredentialGrant,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<(), ControlError> {
+    if !grant.authenticated_user.required {
+        return Ok(());
+    }
+    let subject = authenticated_user_subject(ctx)?;
+    if grant.authenticated_user.subject.as_deref() != Some(subject.as_str()) {
+        return Err(ControlError::new(
+            ErrorCode::AuthenticatedUserUnavailable,
+            "the authenticated Warp user no longer matches the credential grant",
+        ));
+    }
+    Ok(())
+}
+
+fn authenticated_user_subject(
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<String, ControlError> {
+    let auth_state = AuthStateProvider::as_ref(ctx).get();
+    if auth_state.is_anonymous_or_logged_out() {
+        return Err(ControlError::new(
+            ErrorCode::AuthenticatedUserUnavailable,
+            "this action requires a logged-in Warp user",
+        ));
+    }
+    auth_state
+        .user_id()
+        .map(|uid| uid.as_string())
+        .ok_or_else(|| {
+            ControlError::new(
+                ErrorCode::AuthenticatedUserUnavailable,
+                "this action requires a logged-in Warp user",
+            )
+        })
+}
+
+fn drive_object_summary(object: &dyn CloudObject) -> Option<DriveObjectSummary> {
+    Some(DriveObjectSummary {
+        object_type: control_drive_object_type(object)?,
+        id: object.uid(),
+        name: object.display_name(),
+    })
+}
+
+fn drive_object_get_result(
+    object: &dyn CloudObject,
+    requested_type: ControlDriveObjectType,
+) -> Result<DriveGetResult, ControlError> {
+    let summary = drive_object_summary(object).ok_or_else(|| {
+        ControlError::new(
+            ErrorCode::UnsupportedAction,
+            "drive.get does not support this Drive object type",
+        )
+    })?;
+    if summary.object_type != requested_type {
+        return Err(ControlError::new(
+            ErrorCode::TargetStateConflict,
+            "drive.get Drive object type does not match the requested type",
+        ));
+    }
+    Ok(DriveGetResult {
+        object: summary,
+        content: drive_object_content(object, requested_type)?,
+    })
+}
+
+fn control_drive_object_type(object: &dyn CloudObject) -> Option<ControlDriveObjectType> {
+    match object.object_type() {
+        ObjectType::Workflow => {
+            let workflow = object.as_any().downcast_ref::<CloudWorkflow>()?;
+            if workflow.model().data.is_agent_mode_workflow() {
+                Some(ControlDriveObjectType::Prompt)
+            } else {
+                Some(ControlDriveObjectType::Workflow)
+            }
+        }
+        ObjectType::Notebook => Some(ControlDriveObjectType::Notebook),
+        ObjectType::GenericStringObject(GenericStringObjectFormat::Json(
+            JsonObjectType::EnvVarCollection,
+        )) => Some(ControlDriveObjectType::Environment),
+        _ => None,
+    }
+}
+
+fn drive_object_content(
+    object: &dyn CloudObject,
+    object_type: ControlDriveObjectType,
+) -> Result<serde_json::Value, ControlError> {
+    match object_type {
+        ControlDriveObjectType::Workflow | ControlDriveObjectType::Prompt => object
+            .as_any()
+            .downcast_ref::<CloudWorkflow>()
+            .ok_or_else(drive_type_mismatch_error)
+            .and_then(|workflow| {
+                serde_json::to_value(&workflow.model().data).map_err(json_response_error)
+            }),
+        ControlDriveObjectType::Notebook => {
+            let notebook = object
+                .as_any()
+                .downcast_ref::<CloudNotebook>()
+                .ok_or_else(drive_type_mismatch_error)?;
+            Ok(json!({
+                "title": notebook.model().title.clone(),
+                "data": notebook.model().data.clone(),
+                "ai_document_id": notebook.model().ai_document_id.as_ref().map(|id| id.to_string()),
+                "conversation_id": notebook.model().conversation_id.clone(),
+            }))
+        }
+        ControlDriveObjectType::Environment => object
+            .as_any()
+            .downcast_ref::<CloudEnvVarCollection>()
+            .ok_or_else(drive_type_mismatch_error)
+            .and_then(|env_var_collection| {
+                serde_json::to_value(&env_var_collection.model().string_model)
+                    .map_err(json_response_error)
+            }),
+    }
+}
+
+fn drive_object_type_rank(object_type: ControlDriveObjectType) -> u8 {
+    match object_type {
+        ControlDriveObjectType::Workflow => 0,
+        ControlDriveObjectType::Notebook => 1,
+        ControlDriveObjectType::Environment => 2,
+        ControlDriveObjectType::Prompt => 3,
+    }
+}
+
+fn drive_type_mismatch_error() -> ControlError {
+    ControlError::new(
+        ErrorCode::TargetStateConflict,
+        "drive.get Drive object type does not match the requested type",
+    )
+}
+
+fn json_response_error(error: serde_json::Error) -> ControlError {
+    ControlError::with_details(
+        ErrorCode::Internal,
+        "failed to encode local-control Drive response",
+        error.to_string(),
+    )
 }
 
 #[cfg(test)]

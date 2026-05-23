@@ -809,7 +809,9 @@ impl ActionKind {
             | Self::TabCreate
             | Self::FileList
             | Self::ProjectActive
-            | Self::ProjectList => ActionImplementationStatus::Implemented,
+            | Self::ProjectList
+            | Self::DriveList
+            | Self::DriveGet => ActionImplementationStatus::Implemented,
             _ => ActionImplementationStatus::Stub,
         };
         let requires_authenticated_user = self.default_requires_authenticated_user();

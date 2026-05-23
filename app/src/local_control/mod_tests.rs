@@ -1,22 +1,36 @@
+use ::local_control::auth::CredentialGrant;
 use ::local_control::protocol::ActionKind;
 use ::local_control::protocol::{
-    Action, FileTarget, PaneSelector, PaneTarget, TabSelector, TabTarget, TargetSelector,
+    Action, ControlResponse, DriveGetParams, DriveGetResult, DriveListParams, DriveListResult,
+    DriveObjectType, FileTarget, PaneSelector, PaneTarget, TabSelector, TabTarget, TargetSelector,
     WindowSelector, WindowTarget,
 };
-use ::local_control::{ErrorCode, InvocationContext};
+use ::local_control::{ErrorCode, InstanceId, InvocationContext, RequestEnvelope};
+use chrono::Duration;
 use settings::Setting as _;
 use warp_core::features::FeatureFlag;
+use warpui::{App, SingletonEntity};
 
 use super::{
-    action_metadata_for_name, capabilities, ensure_feature_enabled, ensure_settings_allow_action,
-    outside_warp_action_enabled_for_settings, require_active_window_id, validate_action_params,
-    validate_instance_metadata_read_target, validate_tab_create_target,
+    action_metadata_for_name, authenticated_user_subject_for_action, capabilities,
+    ensure_feature_enabled, ensure_settings_allow_action, outside_warp_action_enabled_for_settings,
+    require_active_window_id, validate_action_params, validate_drive_target,
+    validate_instance_metadata_read_target, validate_tab_create_target, LocalControlBridge,
 };
+use crate::auth::AuthStateProvider;
+use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::Owner;
+use crate::drive::folders::{CloudFolder, CloudFolderModel};
+use crate::notebooks::{CloudNotebook, CloudNotebookModel};
+use crate::server::ids::{ClientId, SyncId};
 use crate::settings::{
     AllowInsideWarpControl, AllowInsideWarpReadOnly, AllowInsideWarpReadWrite,
     AllowOutsideWarpControl, AllowOutsideWarpReadOnly, AllowOutsideWarpReadWrite,
     LocalControlSettings,
 };
+use crate::test_util::settings::initialize_settings_for_tests;
+use crate::workflows::{workflow::Workflow, CloudWorkflow, CloudWorkflowModel};
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 fn settings_with_values(
     inside_enabled: bool,
@@ -41,6 +55,112 @@ fn settings_with_outside_warp(
     outside_read_write: bool,
 ) -> LocalControlSettings {
     settings_with_values(true, outside_control, true, false, true, outside_read_write)
+}
+
+fn initialize_drive_app(app: &mut App, logged_in: bool) {
+    initialize_settings_for_tests(app);
+    if logged_in {
+        app.add_singleton_model(|_| AuthStateProvider::new_for_test());
+    } else {
+        app.add_singleton_model(|_| AuthStateProvider::new_logged_out_for_test());
+    }
+    app.add_singleton_model(CloudModel::mock);
+    app.add_singleton_model(UserWorkspaces::default_mock);
+    app.add_singleton_model(LocalControlBridge::new);
+}
+
+fn create_workflow(app: &mut App, name: &str, command: &str) -> String {
+    CloudModel::handle(app).update(app, |cloud_model, ctx| {
+        let client_id = ClientId::new();
+        let sync_id = SyncId::ClientId(client_id);
+        let uid = sync_id.uid();
+        cloud_model.create_object(
+            sync_id,
+            CloudWorkflow::new_local(
+                CloudWorkflowModel::new(Workflow::new(name, command)),
+                Owner::mock_current_user(),
+                None,
+                client_id,
+            ),
+            ctx,
+        );
+        uid
+    })
+}
+
+fn create_notebook(app: &mut App, title: &str, data: &str) -> String {
+    CloudModel::handle(app).update(app, |cloud_model, ctx| {
+        let client_id = ClientId::new();
+        let sync_id = SyncId::ClientId(client_id);
+        let uid = sync_id.uid();
+        cloud_model.create_object(
+            sync_id,
+            CloudNotebook::new_local(
+                CloudNotebookModel {
+                    title: title.to_owned(),
+                    data: data.to_owned(),
+                    ..CloudNotebookModel::default()
+                },
+                Owner::mock_current_user(),
+                None,
+                client_id,
+            ),
+            ctx,
+        );
+        uid
+    })
+}
+
+fn create_folder(app: &mut App, name: &str) -> String {
+    CloudModel::handle(app).update(app, |cloud_model, ctx| {
+        let client_id = ClientId::new();
+        let sync_id = SyncId::ClientId(client_id);
+        let uid = sync_id.uid();
+        cloud_model.create_object(
+            sync_id,
+            CloudFolder::new_local(
+                CloudFolderModel::new(name, false),
+                Owner::mock_current_user(),
+                None,
+                client_id,
+            ),
+            ctx,
+        );
+        uid
+    })
+}
+
+fn authenticated_grant(
+    action: ActionKind,
+    ctx: &mut warpui::ModelContext<LocalControlBridge>,
+) -> CredentialGrant {
+    let mut grant = CredentialGrant::new(
+        InstanceId("inst_test".to_owned()),
+        action,
+        InvocationContext::InsideWarp,
+        Duration::minutes(5),
+    );
+    grant.authenticated_user.subject = authenticated_user_subject_for_action(action, ctx)
+        .expect("authenticated subject check succeeds");
+    grant
+}
+
+fn spoofed_authenticated_grant(action: ActionKind) -> CredentialGrant {
+    let mut grant = CredentialGrant::new(
+        InstanceId("inst_test".to_owned()),
+        action,
+        InvocationContext::InsideWarp,
+        Duration::minutes(5),
+    );
+    grant.authenticated_user.subject = Some("spoofed-user".to_owned());
+    grant
+}
+
+fn response_error_code(response: ::local_control::ResponseEnvelope) -> ErrorCode {
+    let ControlResponse::Error { error } = response.response else {
+        panic!("expected error response");
+    };
+    error.code
 }
 
 #[test]
@@ -128,6 +248,8 @@ fn capabilities_advertises_only_first_slice_core_actions() {
             ActionKind::FileList,
             ActionKind::ProjectActive,
             ActionKind::ProjectList,
+            ActionKind::DriveList,
+            ActionKind::DriveGet,
         ]
     );
 }
@@ -288,4 +410,202 @@ fn file_and_project_metadata_reads_reject_malformed_params() {
         })
         .expect("empty metadata read params are accepted");
     }
+}
+
+#[test]
+fn drive_actions_validate_params_and_targets() {
+    validate_action_params(
+        &Action::with_params(ActionKind::DriveList, DriveListParams::default())
+            .expect("drive list params serialize"),
+    )
+    .expect("drive.list params are accepted");
+
+    let err = validate_action_params(
+        &Action::with_params(
+            ActionKind::DriveGet,
+            DriveGetParams {
+                object_type: DriveObjectType::Workflow,
+                id: String::new(),
+            },
+        )
+        .expect("drive get params serialize"),
+    )
+    .expect_err("empty drive object id is rejected");
+    assert_eq!(err.code, ErrorCode::InvalidParams);
+
+    let err = validate_drive_target(
+        &TargetSelector {
+            window: Some(WindowTarget::Active),
+            ..TargetSelector::default()
+        },
+        ActionKind::DriveList,
+    )
+    .expect_err("window selector is rejected");
+    assert_eq!(err.code, ErrorCode::InvalidSelector);
+}
+
+#[test]
+fn drive_list_requires_true_logged_in_user() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_drive_app(&mut app, false);
+        let request = RequestEnvelope::new(
+            Action::with_params(ActionKind::DriveList, DriveListParams::default())
+                .expect("drive.list params serialize"),
+        );
+        LocalControlBridge::handle(&app).update(&mut app, |bridge, ctx| {
+            let response = bridge.handle_request(
+                request,
+                spoofed_authenticated_grant(ActionKind::DriveList),
+                ctx,
+            );
+            assert_eq!(
+                response_error_code(response),
+                ErrorCode::AuthenticatedUserUnavailable
+            );
+        });
+    })
+}
+
+#[test]
+fn drive_list_returns_authenticated_metadata_without_content() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_drive_app(&mut app, true);
+        create_workflow(&mut app, "build", "cargo check");
+        create_notebook(&mut app, "notes", "# Notes");
+        create_folder(&mut app, "folder");
+        let request = RequestEnvelope::new(
+            Action::with_params(ActionKind::DriveList, DriveListParams::default())
+                .expect("drive.list params serialize"),
+        );
+        LocalControlBridge::handle(&app).update(&mut app, |bridge, ctx| {
+            let response = bridge.handle_request(
+                request,
+                authenticated_grant(ActionKind::DriveList, ctx),
+                ctx,
+            );
+            let ControlResponse::Ok { data } = response.response else {
+                panic!("expected ok response");
+            };
+            let result: DriveListResult =
+                serde_json::from_value(data.clone()).expect("drive list result decodes");
+            assert_eq!(result.objects.len(), 2);
+            assert_eq!(result.objects[0].object_type, DriveObjectType::Workflow);
+            assert_eq!(result.objects[0].name, "build");
+            assert_eq!(result.objects[1].object_type, DriveObjectType::Notebook);
+            assert_eq!(result.objects[1].name, "notes");
+            assert!(data["objects"][0].get("content").is_none());
+            assert!(data["objects"][1].get("content").is_none());
+        });
+    })
+}
+
+#[test]
+fn drive_get_returns_authenticated_underlying_content() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_drive_app(&mut app, true);
+        let workflow_id = create_workflow(&mut app, "build", "cargo check");
+        let request = RequestEnvelope::new(
+            Action::with_params(
+                ActionKind::DriveGet,
+                DriveGetParams {
+                    object_type: DriveObjectType::Workflow,
+                    id: workflow_id,
+                },
+            )
+            .expect("drive.get params serialize"),
+        );
+        LocalControlBridge::handle(&app).update(&mut app, |bridge, ctx| {
+            let response =
+                bridge.handle_request(request, authenticated_grant(ActionKind::DriveGet, ctx), ctx);
+            let ControlResponse::Ok { data } = response.response else {
+                panic!("expected ok response");
+            };
+            let result: DriveGetResult =
+                serde_json::from_value(data).expect("drive get result decodes");
+            assert_eq!(result.object.object_type, DriveObjectType::Workflow);
+            assert_eq!(result.object.name, "build");
+            assert_eq!(result.content["command"], "cargo check");
+        });
+    })
+}
+
+#[test]
+fn drive_metadata_grant_cannot_read_underlying_content() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_drive_app(&mut app, true);
+        let workflow_id = create_workflow(&mut app, "build", "cargo check");
+        let request = RequestEnvelope::new(
+            Action::with_params(
+                ActionKind::DriveGet,
+                DriveGetParams {
+                    object_type: DriveObjectType::Workflow,
+                    id: workflow_id,
+                },
+            )
+            .expect("drive.get params serialize"),
+        );
+        LocalControlBridge::handle(&app).update(&mut app, |bridge, ctx| {
+            let response = bridge.handle_request(
+                request,
+                authenticated_grant(ActionKind::DriveList, ctx),
+                ctx,
+            );
+            assert_eq!(
+                response_error_code(response),
+                ErrorCode::InsufficientPermissions
+            );
+        });
+    })
+}
+
+#[test]
+fn drive_get_rejects_unsupported_or_mismatched_objects() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_drive_app(&mut app, true);
+        let folder_id = create_folder(&mut app, "folder");
+        let workflow_id = create_workflow(&mut app, "build", "cargo check");
+        let unsupported_request = RequestEnvelope::new(
+            Action::with_params(
+                ActionKind::DriveGet,
+                DriveGetParams {
+                    object_type: DriveObjectType::Workflow,
+                    id: folder_id,
+                },
+            )
+            .expect("drive.get params serialize"),
+        );
+        let mismatched_request = RequestEnvelope::new(
+            Action::with_params(
+                ActionKind::DriveGet,
+                DriveGetParams {
+                    object_type: DriveObjectType::Notebook,
+                    id: workflow_id,
+                },
+            )
+            .expect("drive.get params serialize"),
+        );
+        LocalControlBridge::handle(&app).update(&mut app, |bridge, ctx| {
+            let response = bridge.handle_request(
+                unsupported_request,
+                authenticated_grant(ActionKind::DriveGet, ctx),
+                ctx,
+            );
+            assert_eq!(response_error_code(response), ErrorCode::UnsupportedAction);
+
+            let response = bridge.handle_request(
+                mismatched_request,
+                authenticated_grant(ActionKind::DriveGet, ctx),
+                ctx,
+            );
+            assert_eq!(
+                response_error_code(response),
+                ErrorCode::TargetStateConflict
+            );
+        });
+    })
 }
