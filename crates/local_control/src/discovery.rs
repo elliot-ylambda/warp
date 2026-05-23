@@ -111,28 +111,48 @@ impl RegisteredInstance {
                 err.to_string(),
             )
         })?;
+        set_private_dir_permissions(&dir);
         let path = record_path(&dir, &record.instance_id);
-        let bytes = serde_json::to_vec_pretty(&record).map_err(|err| {
-            ControlError::with_details(
-                ErrorCode::Internal,
-                "failed to serialize local-control discovery record",
-                err.to_string(),
-            )
-        })?;
-        fs::write(&path, bytes).map_err(|err| {
-            ControlError::with_details(
-                ErrorCode::Internal,
-                "failed to write local-control discovery record",
-                err.to_string(),
-            )
-        })?;
-        set_private_permissions(&path);
+        write_record(&path, &record)?;
         Ok(Self { record, path })
     }
 
     pub fn record(&self) -> &InstanceRecord {
         &self.record
     }
+
+    pub fn update(&mut self, record: InstanceRecord) -> Result<(), ControlError> {
+        let path = record_path(
+            self.path.parent().unwrap_or_else(|| Path::new(".")),
+            &record.instance_id,
+        );
+        write_record(&path, &record)?;
+        if path != self.path {
+            let _ = fs::remove_file(&self.path);
+            self.path = path;
+        }
+        self.record = record;
+        Ok(())
+    }
+}
+
+fn write_record(path: &Path, record: &InstanceRecord) -> Result<(), ControlError> {
+    let bytes = serde_json::to_vec_pretty(record).map_err(|err| {
+        ControlError::with_details(
+            ErrorCode::Internal,
+            "failed to serialize local-control discovery record",
+            err.to_string(),
+        )
+    })?;
+    fs::write(path, bytes).map_err(|err| {
+        ControlError::with_details(
+            ErrorCode::Internal,
+            "failed to write local-control discovery record",
+            err.to_string(),
+        )
+    })?;
+    set_private_permissions(path);
+    Ok(())
 }
 
 impl Drop for RegisteredInstance {
@@ -203,6 +223,20 @@ fn record_path(dir: &Path, instance_id: &InstanceId) -> PathBuf {
 }
 
 #[cfg(unix)]
+fn set_private_dir_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    if let Ok(metadata) = fs::metadata(path) {
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o700);
+        let _ = fs::set_permissions(path, permissions);
+    }
+}
+
+#[cfg(not(unix))]
+fn set_private_dir_permissions(_path: &Path) {}
+
+#[cfg(unix)]
 fn set_private_permissions(path: &Path) {
     use std::os::unix::fs::PermissionsExt as _;
 
@@ -266,12 +300,36 @@ mod tests {
         assert!(record.credential_broker.is_none());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn discovery_directory_is_owner_only_on_unix() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let record = InstanceRecord::for_current_process(
+            Some(ControlEndpoint::localhost(4000)),
+            "local",
+            "dev.warp.WarpLocal",
+            Some("test".to_owned()),
+            crate::protocol::ActionKind::implemented_metadata(),
+        );
+        let _registered =
+            RegisteredInstance::register_in_dir_for_test(record, dir.path()).expect("registered");
+        let mode = fs::metadata(dir.path())
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+
     impl RegisteredInstance {
         fn register_in_dir_for_test(
             record: InstanceRecord,
             dir: &Path,
         ) -> Result<Self, ControlError> {
             fs::create_dir_all(dir).expect("create dir");
+            set_private_dir_permissions(dir);
             let path = record_path(dir, &record.instance_id);
             let bytes = serde_json::to_vec_pretty(&record).expect("serialize");
             fs::write(&path, bytes).expect("write");

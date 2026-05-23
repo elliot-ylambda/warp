@@ -5,7 +5,7 @@ use crate::settings::{
 use ::local_control::{ActionKind, ControlError, ErrorCode, InvocationContext, PermissionCategory};
 use warpui::{ModelContext, SingletonEntity};
 
-use crate::local_control::{LocalControlBridge, LocalControlServer};
+use crate::local_control::LocalControlBridge;
 
 pub(super) fn warp_control_cli_enabled() -> bool {
     FeatureFlag::WarpControlCli.is_enabled()
@@ -21,17 +21,6 @@ pub(super) fn ensure_feature_enabled() -> Result<(), ControlError> {
     ))
 }
 
-pub(super) fn outside_warp_any_implemented_action_enabled(
-    ctx: &ModelContext<LocalControlServer>,
-) -> bool {
-    let settings = LocalControlSettings::as_ref(ctx);
-    ActionKind::implemented_metadata()
-        .into_iter()
-        .any(|metadata| {
-            outside_warp_permission_enabled_for_settings(settings, metadata.permission_category)
-        })
-}
-
 #[cfg(test)]
 pub(crate) fn outside_warp_action_enabled_for_settings(
     settings: &LocalControlSettings,
@@ -40,6 +29,7 @@ pub(crate) fn outside_warp_action_enabled_for_settings(
     outside_warp_permission_enabled_for_settings(settings, action.metadata().permission_category)
 }
 
+#[cfg(test)]
 fn outside_warp_permission_enabled_for_settings(
     settings: &LocalControlSettings,
     permission: PermissionCategory,

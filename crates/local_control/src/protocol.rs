@@ -139,6 +139,7 @@ pub enum ErrorCode {
     InvalidParams,
     NoInstance,
     AmbiguousInstance,
+    AmbiguousTarget,
     StaleTarget,
     TargetStateConflict,
     MissingTarget,

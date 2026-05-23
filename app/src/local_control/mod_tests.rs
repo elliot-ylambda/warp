@@ -13,34 +13,69 @@ use super::{
     validate_tab_create_target,
 };
 use crate::settings::{
-    AllowInsideWarpControl, AllowInsideWarpReadOnly, AllowInsideWarpReadWrite,
-    AllowOutsideWarpControl, AllowOutsideWarpReadOnly, AllowOutsideWarpReadWrite,
+    AllowInsideWarpAppStateMutations, AllowInsideWarpControl,
+    AllowInsideWarpMetadataConfigurationMutations, AllowInsideWarpMetadataReads,
+    AllowInsideWarpUnderlyingDataMutations, AllowInsideWarpUnderlyingDataReads,
+    AllowOutsideWarpAppStateMutations, AllowOutsideWarpControl,
+    AllowOutsideWarpMetadataConfigurationMutations, AllowOutsideWarpMetadataReads,
+    AllowOutsideWarpUnderlyingDataMutations, AllowOutsideWarpUnderlyingDataReads,
     LocalControlSettings,
 };
 
 fn settings_with_values(
     inside_enabled: bool,
     outside_enabled: bool,
-    inside_read_only: bool,
-    outside_read_only: bool,
-    inside_read_write: bool,
-    outside_read_write: bool,
+    inside_metadata_reads: bool,
+    outside_metadata_reads: bool,
+    inside_app_state_mutations: bool,
+    outside_app_state_mutations: bool,
 ) -> LocalControlSettings {
     LocalControlSettings {
         allow_inside_warp_control: AllowInsideWarpControl::new(Some(inside_enabled)),
         allow_outside_warp_control: AllowOutsideWarpControl::new(Some(outside_enabled)),
-        allow_inside_warp_read_only: AllowInsideWarpReadOnly::new(Some(inside_read_only)),
-        allow_outside_warp_read_only: AllowOutsideWarpReadOnly::new(Some(outside_read_only)),
-        allow_inside_warp_read_write: AllowInsideWarpReadWrite::new(Some(inside_read_write)),
-        allow_outside_warp_read_write: AllowOutsideWarpReadWrite::new(Some(outside_read_write)),
+        allow_inside_warp_metadata_reads: AllowInsideWarpMetadataReads::new(Some(
+            inside_metadata_reads,
+        )),
+        allow_outside_warp_metadata_reads: AllowOutsideWarpMetadataReads::new(Some(
+            outside_metadata_reads,
+        )),
+        allow_inside_warp_underlying_data_reads: AllowInsideWarpUnderlyingDataReads::new(Some(
+            true,
+        )),
+        allow_outside_warp_underlying_data_reads: AllowOutsideWarpUnderlyingDataReads::new(Some(
+            false,
+        )),
+        allow_inside_warp_app_state_mutations: AllowInsideWarpAppStateMutations::new(Some(
+            inside_app_state_mutations,
+        )),
+        allow_outside_warp_app_state_mutations: AllowOutsideWarpAppStateMutations::new(Some(
+            outside_app_state_mutations,
+        )),
+        allow_inside_warp_metadata_configuration_mutations:
+            AllowInsideWarpMetadataConfigurationMutations::new(Some(true)),
+        allow_outside_warp_metadata_configuration_mutations:
+            AllowOutsideWarpMetadataConfigurationMutations::new(Some(false)),
+        allow_inside_warp_underlying_data_mutations: AllowInsideWarpUnderlyingDataMutations::new(
+            Some(true),
+        ),
+        allow_outside_warp_underlying_data_mutations: AllowOutsideWarpUnderlyingDataMutations::new(
+            Some(false),
+        ),
     }
 }
 
 fn settings_with_outside_warp(
     outside_control: bool,
-    outside_read_write: bool,
+    outside_app_state_mutations: bool,
 ) -> LocalControlSettings {
-    settings_with_values(true, outside_control, true, false, true, outside_read_write)
+    settings_with_values(
+        true,
+        outside_control,
+        true,
+        false,
+        true,
+        outside_app_state_mutations,
+    )
 }
 
 #[test]

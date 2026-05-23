@@ -25,9 +25,7 @@ use warp_core::channel::ChannelState;
 use warpui::{Entity, ModelContext, ModelSpawner, SingletonEntity};
 
 pub use bridge::LocalControlBridge;
-use permissions::{
-    ensure_action_allowed, ensure_feature_enabled, outside_warp_any_implemented_action_enabled,
-};
+use permissions::{ensure_action_allowed, ensure_feature_enabled};
 
 #[derive(Clone)]
 struct ControlServerState {
@@ -38,6 +36,7 @@ struct ControlServerState {
 
 pub struct LocalControlServer {
     _runtime: Option<tokio::runtime::Runtime>,
+    control_endpoint: Option<ControlEndpoint>,
     _registered_instance: Option<RegisteredInstance>,
 }
 
@@ -52,15 +51,29 @@ impl LocalControlServer {
         if !permissions::warp_control_cli_enabled() {
             return Self {
                 _runtime: None,
+                control_endpoint: None,
                 _registered_instance: None,
             };
         }
         match Self::start(ctx) {
-            Ok(server) => server,
+            Ok(server) => {
+                ctx.subscribe_to_model(
+                    &crate::settings::LocalControlSettings::handle(ctx),
+                    |server, _, ctx| {
+                        if let Err(error) = server.refresh_discovery_record(ctx) {
+                            log::warn!(
+                                "Failed to refresh local-control discovery record: {error:#}"
+                            );
+                        }
+                    },
+                );
+                server
+            }
             Err(error) => {
                 log::warn!("Failed to start local-control server: {error:#}");
                 Self {
                     _runtime: None,
+                    control_endpoint: None,
                     _registered_instance: None,
                 }
             }
@@ -69,12 +82,6 @@ impl LocalControlServer {
 
     fn start(ctx: &mut ModelContext<Self>) -> Result<Self, ControlError> {
         ensure_feature_enabled()?;
-        if !outside_warp_any_implemented_action_enabled(ctx) {
-            return Err(ControlError::new(
-                ErrorCode::LocalControlDisabled,
-                "outside-Warp local control is disabled",
-            ));
-        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_io()
@@ -105,17 +112,8 @@ impl LocalControlServer {
                 err.to_string(),
             )
         })?;
-        let outside_warp_control_enabled = crate::settings::LocalControlSettings::as_ref(ctx)
-            .is_context_enabled(LocalControlInvocationContext::OutsideWarp);
-        let endpoint =
-            outside_warp_control_enabled.then_some(ControlEndpoint::localhost(port.port()));
-        let record = InstanceRecord::for_current_process(
-            endpoint,
-            ChannelState::channel().to_string(),
-            ChannelState::app_id().to_string(),
-            ChannelState::app_version().map(str::to_owned),
-            ActionKind::implemented_metadata(),
-        );
+        let control_endpoint = ControlEndpoint::localhost(port.port());
+        let record = discovery_record_for_settings(ctx, control_endpoint.clone());
         let instance_id = record.instance_id.clone();
         let bridge_spawner = LocalControlBridge::handle(ctx).update(ctx, |bridge, ctx| {
             bridge.set_instance_id(instance_id.clone());
@@ -138,9 +136,41 @@ impl LocalControlServer {
         });
         Ok(Self {
             _runtime: Some(runtime),
+            control_endpoint: Some(control_endpoint),
             _registered_instance: Some(registered_instance),
         })
     }
+
+    fn refresh_discovery_record(
+        &mut self,
+        ctx: &mut ModelContext<Self>,
+    ) -> Result<(), ControlError> {
+        let Some(control_endpoint) = self.control_endpoint.clone() else {
+            return Ok(());
+        };
+        let Some(registered_instance) = &mut self._registered_instance else {
+            return Ok(());
+        };
+        let mut record = discovery_record_for_settings(ctx, control_endpoint);
+        record.instance_id = registered_instance.record().instance_id.clone();
+        registered_instance.update(record)
+    }
+}
+
+fn discovery_record_for_settings(
+    ctx: &ModelContext<LocalControlServer>,
+    control_endpoint: ControlEndpoint,
+) -> InstanceRecord {
+    let outside_warp_control_enabled = crate::settings::LocalControlSettings::as_ref(ctx)
+        .is_context_enabled(LocalControlInvocationContext::OutsideWarp);
+    let endpoint = outside_warp_control_enabled.then_some(control_endpoint);
+    InstanceRecord::for_current_process(
+        endpoint,
+        ChannelState::channel().to_string(),
+        ChannelState::app_id().to_string(),
+        ChannelState::app_version().map(str::to_owned),
+        ActionKind::implemented_metadata(),
+    )
 }
 
 async fn handle_credential_request(

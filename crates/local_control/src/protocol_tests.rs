@@ -23,6 +23,12 @@ fn response_error_serializes_machine_code() {
 }
 
 #[test]
+fn ambiguous_target_error_code_is_stable() {
+    let value = serde_json::to_value(ErrorCode::AmbiguousTarget).expect("code serializes");
+    assert_eq!(value, serde_json::json!("ambiguous_target"));
+}
+
+#[test]
 fn input_run_is_not_in_the_allowlisted_catalog() {
     let action = serde_json::from_value::<ActionKind>(serde_json::json!("input.run"));
     assert!(action.is_err());
