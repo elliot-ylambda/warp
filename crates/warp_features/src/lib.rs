@@ -797,6 +797,9 @@ pub enum FeatureFlag {
     /// Enables tab configs — user-definable TOML templates for launching custom tab layouts.
     TabConfigs,
 
+    /// Enables Warp local control through the standalone warpctrl CLI.
+    WarpControlCli,
+
     /// When enabled, free-tier users are blocked from AI features (no-AI experiment arm).
     FreeUserNoAi,
 
@@ -816,9 +819,6 @@ pub enum FeatureFlag {
 
     /// Enables conversation retrieval via the CLI (oz run conversation get, oz run get --conversation).
     ConversationApi,
-
-    /// Gates the local Warp Control CLI (`warpctrl`) settings, discovery, and app bridge.
-    WarpControlCli,
 
     /// Guided onboarding flow for existing users introducing HOA features
     /// (vertical tabs, agent inbox, tab configs).

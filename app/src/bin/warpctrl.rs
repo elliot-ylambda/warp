@@ -1,6 +1,6 @@
-use clap::Parser as _;
+use std::process::ExitCode;
 
-fn main() -> anyhow::Result<()> {
-    let args = warp_cli::local_control::ControlArgs::parse();
+fn main() -> ExitCode {
+    let args = warp_cli::local_control::ControlArgs::from_env();
     warp_cli::local_control::run(args)
 }

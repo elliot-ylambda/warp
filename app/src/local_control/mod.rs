@@ -1,3 +1,4 @@
+use crate::features::FeatureFlag;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -22,7 +23,6 @@ use axum::{Json, Router};
 use chrono::Duration;
 use serde_json::json;
 use warp_core::channel::ChannelState;
-use warp_core::features::FeatureFlag;
 use warpui::{Entity, ModelContext, ModelSpawner, SingletonEntity, TypedActionView};
 
 use crate::workspace::{Workspace, WorkspaceAction};
@@ -66,6 +66,18 @@ impl LocalControlServer {
     }
 
     fn start(ctx: &mut ModelContext<Self>) -> Result<Self, ControlError> {
+        if !FeatureFlag::WarpControlCli.is_enabled() {
+            return Err(ControlError::new(
+                ErrorCode::LocalControlDisabled,
+                "local control is disabled by feature flag",
+            ));
+        }
+        if !outside_warp_any_implemented_action_enabled(ctx) {
+            return Err(ControlError::new(
+                ErrorCode::LocalControlDisabled,
+                "outside-Warp local control is disabled",
+            ));
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_io()
@@ -159,6 +171,15 @@ impl LocalControlBridge {
         grant: CredentialGrant,
         ctx: &mut ModelContext<Self>,
     ) -> ResponseEnvelope {
+        if !FeatureFlag::WarpControlCli.is_enabled() {
+            return ResponseEnvelope::error(
+                request.request_id,
+                ControlError::new(
+                    ErrorCode::LocalControlDisabled,
+                    "local control is disabled by feature flag",
+                ),
+            );
+        }
         if request.protocol_version != PROTOCOL_VERSION {
             return ResponseEnvelope::error(
                 request.request_id,
@@ -566,6 +587,32 @@ fn target_window_id(
 
 fn active_window_id(active_window: Option<warpui::WindowId>) -> Option<warpui::WindowId> {
     active_window
+}
+
+fn outside_warp_any_implemented_action_enabled(ctx: &ModelContext<LocalControlServer>) -> bool {
+    let settings = LocalControlSettings::as_ref(ctx);
+    ActionKind::implemented_metadata()
+        .into_iter()
+        .any(|metadata| {
+            outside_warp_permission_enabled_for_settings(settings, metadata.permission_category)
+        })
+}
+#[cfg(test)]
+
+fn outside_warp_action_enabled_for_settings(
+    settings: &LocalControlSettings,
+    action: ActionKind,
+) -> bool {
+    outside_warp_permission_enabled_for_settings(settings, action.metadata().permission_category)
+}
+
+fn outside_warp_permission_enabled_for_settings(
+    settings: &LocalControlSettings,
+    permission: PermissionCategory,
+) -> bool {
+    let context = LocalControlInvocationContext::OutsideWarp;
+    settings.is_context_enabled(context)
+        && settings.is_permission_enabled(context, local_permission(permission))
 }
 
 #[cfg(test)]

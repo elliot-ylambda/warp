@@ -6,6 +6,7 @@ use super::{
     SettingsSection, ToggleState,
 };
 use crate::appearance::Appearance;
+use crate::features::FeatureFlag;
 use crate::report_if_error;
 use crate::settings::{
     AllowInsideWarpControl, AllowInsideWarpReadOnly, AllowInsideWarpReadWrite,
@@ -15,7 +16,6 @@ use crate::settings::{
 use settings::{Setting as _, ToggleableSetting as _};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use warp_core::features::FeatureFlag;
 use warp_core::settings::SyncToCloud;
 use warpui::elements::{Container, Element, MouseStateHandle};
 use warpui::ui_components::components::UiComponent;
@@ -138,9 +138,11 @@ pub struct ScriptingSettingsPageView {
 
 impl ScriptingSettingsPageView {
     pub fn new(ctx: &mut ViewContext<Self>) -> Self {
-        ctx.subscribe_to_model(&LocalControlSettings::handle(ctx), |_, _, _, ctx| {
-            ctx.notify();
-        });
+        if FeatureFlag::WarpControlCli.is_enabled() {
+            ctx.subscribe_to_model(&LocalControlSettings::handle(ctx), |_, _, _, ctx| {
+                ctx.notify();
+            });
+        }
 
         Self {
             page: PageType::new_uncategorized(
