@@ -1209,6 +1209,10 @@ impl ActionKind {
             | Self::BlockList
             | Self::BlockGet
             | Self::InputGet
+            | Self::InputInsert
+            | Self::InputReplace
+            | Self::InputClear
+            | Self::InputModeSet
             | Self::InputRun
             | Self::HistoryList
             | Self::ThemeList
@@ -1228,6 +1232,8 @@ impl ActionKind {
             | Self::ProjectList
             | Self::DriveList
             | Self::DriveGet
+            | Self::PaneSessionPrevious
+            | Self::PaneSessionNext
             | Self::DriveCreate
             | Self::DriveUpdate
             | Self::DriveDelete
@@ -1523,6 +1529,17 @@ impl ActionKind {
                 InvocationContext::InsideWarp,
                 InvocationContext::OutsideWarp,
             ];
+        }
+        if matches!(
+            self,
+            Self::InputInsert
+                | Self::InputReplace
+                | Self::InputClear
+                | Self::InputModeSet
+                | Self::PaneSessionPrevious
+                | Self::PaneSessionNext
+        ) {
+            return vec![InvocationContext::InsideWarp];
         }
         Vec::new()
     }
