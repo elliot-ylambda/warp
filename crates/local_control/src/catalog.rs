@@ -181,6 +181,8 @@ pub enum ActionKind {
     PaneSessionPrevious,
     #[serde(rename = "pane.session.next")]
     PaneSessionNext,
+    #[serde(rename = "pane.session.reopen")]
+    PaneSessionReopen,
     #[serde(rename = "session.list")]
     SessionList,
     #[serde(rename = "block.list")]
@@ -287,6 +289,7 @@ impl ActionKind {
         Self::PaneResize,
         Self::PaneSessionPrevious,
         Self::PaneSessionNext,
+        Self::PaneSessionReopen,
         Self::SessionList,
         Self::BlockList,
         Self::BlockGet,
@@ -359,6 +362,7 @@ impl ActionKind {
             Self::PaneResize => "pane.resize",
             Self::PaneSessionPrevious => "pane.session.previous",
             Self::PaneSessionNext => "pane.session.next",
+            Self::PaneSessionReopen => "pane.session.reopen",
             Self::SessionList => "session.list",
             Self::BlockList => "block.list",
             Self::BlockGet => "block.get",
@@ -429,17 +433,34 @@ impl ActionKind {
             | Self::PaneNavigate
             | Self::PaneClose
             | Self::PaneMaximize
-            | Self::PaneResize => ActionImplementationStatus::Implemented,
+            | Self::PaneResize
+            | Self::PaneSessionPrevious
+            | Self::PaneSessionNext
+            | Self::PaneSessionReopen
+            | Self::InputInsert
+            | Self::InputReplace
+            | Self::InputClear
+            | Self::InputModeSet
+            | Self::ThemeSet
+            | Self::AppearanceSet
+            | Self::AppearanceFontSize
+            | Self::AppearanceZoom
+            | Self::SettingSet
+            | Self::SettingToggle
+            | Self::AppSettingsOpen
+            | Self::AppCommandPaletteOpen
+            | Self::AppCommandSearchOpen
+            | Self::AppWarpDriveOpen
+            | Self::AppWarpDriveToggle
+            | Self::AppResourceCenterToggle
+            | Self::AppAiAssistantToggle
+            | Self::AppCodeReviewToggle
+            | Self::AppVerticalTabsToggle => ActionImplementationStatus::Implemented,
             _ => ActionImplementationStatus::Stub,
         };
         let requires_authenticated_user = self.default_requires_authenticated_user();
         let requires_authenticated_scripting = self.default_requires_authenticated_scripting();
-        let allowed_invocation_contexts =
-            if implementation_status == ActionImplementationStatus::Implemented {
-                vec![InvocationContext::OutsideWarp]
-            } else {
-                Vec::new()
-            };
+        let allowed_invocation_contexts = self.default_allowed_invocation_contexts();
         ActionMetadata {
             kind: self,
             name: self.as_str().to_owned(),
@@ -536,6 +557,7 @@ impl ActionKind {
             | Self::PaneResize
             | Self::PaneSessionPrevious
             | Self::PaneSessionNext
+            | Self::PaneSessionReopen
             | Self::ThemeSet
             | Self::AppearanceSet
             | Self::AppearanceFontSize
@@ -616,6 +638,7 @@ impl ActionKind {
             | Self::PaneResize
             | Self::PaneSessionPrevious
             | Self::PaneSessionNext
+            | Self::PaneSessionReopen
             | Self::FileOpen => StateDataCategory::AppStateMutation,
         }
     }
@@ -666,6 +689,7 @@ impl ActionKind {
                 | Self::PaneResize
                 | Self::PaneSessionPrevious
                 | Self::PaneSessionNext
+                | Self::PaneSessionReopen
                 | Self::InputInsert
                 | Self::InputReplace
                 | Self::InputClear
@@ -686,6 +710,76 @@ impl ActionKind {
                 | Self::DriveRun
                 | Self::DriveInsert
         )
+    }
+
+    fn default_allowed_invocation_contexts(self) -> Vec<InvocationContext> {
+        let metadata_status = match self {
+            Self::InstanceList
+            | Self::AppPing
+            | Self::AppInspect
+            | Self::AppVersion
+            | Self::AppActive
+            | Self::ActionList
+            | Self::ActionGet
+            | Self::WindowList
+            | Self::TabList
+            | Self::TabCreate
+            | Self::PaneList
+            | Self::SessionList
+            | Self::BlockList
+            | Self::BlockGet
+            | Self::InputGet
+            | Self::HistoryList
+            | Self::ThemeList
+            | Self::AppearanceGet
+            | Self::SettingGet
+            | Self::SettingList
+            | Self::AppFocus
+            | Self::WindowCreate
+            | Self::WindowFocus
+            | Self::WindowClose
+            | Self::TabActivate
+            | Self::TabMove
+            | Self::TabClose
+            | Self::PaneSplit
+            | Self::PaneFocus
+            | Self::PaneNavigate
+            | Self::PaneClose
+            | Self::PaneMaximize
+            | Self::PaneResize
+            | Self::ThemeSet
+            | Self::AppearanceSet
+            | Self::AppearanceFontSize
+            | Self::AppearanceZoom
+            | Self::SettingSet
+            | Self::SettingToggle
+            | Self::AppSettingsOpen
+            | Self::AppCommandPaletteOpen
+            | Self::AppCommandSearchOpen
+            | Self::AppWarpDriveOpen
+            | Self::AppWarpDriveToggle
+            | Self::AppResourceCenterToggle
+            | Self::AppAiAssistantToggle
+            | Self::AppCodeReviewToggle
+            | Self::AppVerticalTabsToggle => {
+                return vec![InvocationContext::OutsideWarp];
+            }
+            Self::PaneSessionPrevious
+            | Self::PaneSessionNext
+            | Self::PaneSessionReopen
+            | Self::InputInsert
+            | Self::InputReplace
+            | Self::InputClear
+            | Self::InputModeSet => {
+                return vec![InvocationContext::InsideWarp];
+            }
+            _ => ActionImplementationStatus::Stub,
+        };
+        if metadata_status == ActionImplementationStatus::Implemented {
+            vec![InvocationContext::OutsideWarp]
+        } else {
+            Vec::new()
+        }
     }
 
     fn default_requires_authenticated_scripting(self) -> bool {
@@ -717,7 +811,8 @@ impl ActionKind {
             | Self::PaneMaximize
             | Self::PaneResize
             | Self::PaneSessionPrevious
-            | Self::PaneSessionNext => TargetScope::Pane,
+            | Self::PaneSessionNext
+            | Self::PaneSessionReopen => TargetScope::Pane,
             Self::SessionList
             | Self::InputGet
             | Self::InputInsert

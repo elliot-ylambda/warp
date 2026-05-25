@@ -235,9 +235,39 @@ fn capabilities_advertises_core_metadata_and_layout_mutation_actions() {
     assert!(caps.contains(&ActionKind::PaneMaximize));
     assert!(caps.contains(&ActionKind::PaneResize));
     assert!(!caps.contains(&ActionKind::TabRename));
-    assert!(!caps.contains(&ActionKind::PaneSessionPrevious));
-    assert!(!caps.contains(&ActionKind::PaneSessionNext));
     assert!(!caps.contains(&ActionKind::InputRun));
+}
+
+#[test]
+fn capabilities_advertises_session_and_input_mutation_actions() {
+    let caps = capabilities();
+    assert!(caps.contains(&ActionKind::PaneSessionPrevious));
+    assert!(caps.contains(&ActionKind::PaneSessionNext));
+    assert!(caps.contains(&ActionKind::PaneSessionReopen));
+    assert!(caps.contains(&ActionKind::InputInsert));
+    assert!(caps.contains(&ActionKind::InputReplace));
+    assert!(caps.contains(&ActionKind::InputClear));
+    assert!(caps.contains(&ActionKind::InputModeSet));
+}
+
+#[test]
+fn capabilities_advertises_settings_and_surface_mutation_actions() {
+    let caps = capabilities();
+    assert!(caps.contains(&ActionKind::ThemeSet));
+    assert!(caps.contains(&ActionKind::AppearanceSet));
+    assert!(caps.contains(&ActionKind::AppearanceFontSize));
+    assert!(caps.contains(&ActionKind::AppearanceZoom));
+    assert!(caps.contains(&ActionKind::SettingSet));
+    assert!(caps.contains(&ActionKind::SettingToggle));
+    assert!(caps.contains(&ActionKind::AppSettingsOpen));
+    assert!(caps.contains(&ActionKind::AppCommandPaletteOpen));
+    assert!(caps.contains(&ActionKind::AppCommandSearchOpen));
+    assert!(caps.contains(&ActionKind::AppWarpDriveOpen));
+    assert!(caps.contains(&ActionKind::AppWarpDriveToggle));
+    assert!(caps.contains(&ActionKind::AppResourceCenterToggle));
+    assert!(caps.contains(&ActionKind::AppAiAssistantToggle));
+    assert!(caps.contains(&ActionKind::AppCodeReviewToggle));
+    assert!(caps.contains(&ActionKind::AppVerticalTabsToggle));
 }
 
 #[test]
@@ -1114,6 +1144,194 @@ fn layout_mutation_params_reject_malformed_inputs() {
         params: serde_json::json!({}),
     })
     .expect("pane.close accepts empty params");
+}
+
+#[test]
+fn session_mutation_actions_use_app_state_mutation_permission_category() {
+    for action in [
+        ActionKind::PaneSessionPrevious,
+        ActionKind::PaneSessionNext,
+        ActionKind::PaneSessionReopen,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::MutateAppState,
+            "{} should use MutateAppState permission",
+            action.as_str()
+        );
+    }
+}
+
+#[test]
+fn input_staging_mutations_are_underlying_data_mutations() {
+    for action in [
+        ActionKind::InputInsert,
+        ActionKind::InputReplace,
+        ActionKind::InputClear,
+        ActionKind::InputModeSet,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::MutateUnderlyingData,
+            "{} should use MutateUnderlyingData permission",
+            action.as_str()
+        );
+    }
+}
+
+#[test]
+fn inside_warp_only_actions_reject_outside_warp_invocation_context() {
+    let all_enabled = settings_with_values(true, true, true, true, true, true);
+
+    for action in [
+        ActionKind::PaneSessionPrevious,
+        ActionKind::PaneSessionNext,
+        ActionKind::PaneSessionReopen,
+        ActionKind::InputInsert,
+        ActionKind::InputReplace,
+        ActionKind::InputClear,
+        ActionKind::InputModeSet,
+    ] {
+        let err =
+            ensure_settings_allow_action(&all_enabled, InvocationContext::OutsideWarp, action)
+                .expect_err("InsideWarp-only action rejects OutsideWarp context");
+        assert_eq!(
+            err.code,
+            ErrorCode::ExecutionContextNotAllowed,
+            "{} should reject outside-Warp context",
+            action.as_str()
+        );
+    }
+}
+
+#[test]
+fn settings_mutation_actions_use_metadata_configuration_permission() {
+    for action in [
+        ActionKind::ThemeSet,
+        ActionKind::AppearanceSet,
+        ActionKind::AppearanceFontSize,
+        ActionKind::AppearanceZoom,
+        ActionKind::SettingSet,
+        ActionKind::SettingToggle,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::MutateMetadataConfiguration,
+            "{} should use MutateMetadataConfiguration permission",
+            action.as_str()
+        );
+    }
+}
+
+#[test]
+fn settings_mutations_require_metadata_configuration_permission() {
+    let metadata_config_only = settings_with_values(true, false, false, false, true, false);
+    let app_state_only = settings_with_values(true, false, false, true, false, false);
+
+    for action in [
+        ActionKind::ThemeSet,
+        ActionKind::AppearanceSet,
+        ActionKind::SettingSet,
+        ActionKind::SettingToggle,
+    ] {
+        ensure_settings_allow_action(
+            &metadata_config_only,
+            InvocationContext::OutsideWarp,
+            action,
+        )
+        .expect("metadata config permission allows settings mutation");
+        let err =
+            ensure_settings_allow_action(&app_state_only, InvocationContext::OutsideWarp, action)
+                .expect_err("settings mutation denied without metadata config permission");
+        assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+    }
+}
+
+#[test]
+fn app_surface_actions_use_app_state_mutation_permission() {
+    for action in [
+        ActionKind::AppSettingsOpen,
+        ActionKind::AppCommandPaletteOpen,
+        ActionKind::AppCommandSearchOpen,
+        ActionKind::AppWarpDriveOpen,
+        ActionKind::AppWarpDriveToggle,
+        ActionKind::AppResourceCenterToggle,
+        ActionKind::AppAiAssistantToggle,
+        ActionKind::AppCodeReviewToggle,
+        ActionKind::AppVerticalTabsToggle,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::MutateAppState,
+            "{} should use MutateAppState permission",
+            action.as_str()
+        );
+    }
+}
+
+#[test]
+fn settings_mutations_require_authenticated_user() {
+    for action in [
+        ActionKind::ThemeSet,
+        ActionKind::AppearanceSet,
+        ActionKind::AppearanceFontSize,
+        ActionKind::AppearanceZoom,
+        ActionKind::SettingSet,
+        ActionKind::SettingToggle,
+    ] {
+        assert!(
+            action.metadata().requires_authenticated_user,
+            "{} should require authenticated user",
+            action.as_str()
+        );
+    }
+}
+
+#[test]
+fn settings_allowlist_rejects_local_control_keys() {
+    let private_err = rejected_setting_key("local_control.allow_inside_warp_control");
+    assert_eq!(private_err.code, ErrorCode::NotAllowlisted);
+    assert!(private_err.message.contains("private or sensitive"));
+
+    let private_err = rejected_setting_key("local_control.allow_outside_warp_metadata_reads");
+    assert_eq!(private_err.code, ErrorCode::NotAllowlisted);
+    assert!(private_err.message.contains("private or sensitive"));
+}
+
+#[test]
+fn action_metadata_lookup_reports_implemented_status_for_new_mutations() {
+    for action_name in [
+        "pane.session.previous",
+        "pane.session.next",
+        "pane.session.reopen",
+        "input.insert",
+        "input.replace",
+        "input.clear",
+        "input.mode.set",
+        "theme.set",
+        "appearance.set",
+        "appearance.font_size",
+        "appearance.zoom",
+        "setting.set",
+        "setting.toggle",
+        "app.settings.open",
+        "app.command_palette.open",
+        "app.command_search.open",
+        "app.warp_drive.open",
+        "app.warp_drive.toggle",
+        "app.resource_center.toggle",
+        "app.ai_assistant.toggle",
+        "app.code_review.toggle",
+        "app.vertical_tabs.toggle",
+    ] {
+        let metadata = action_metadata_for_name(action_name)
+            .unwrap_or_else(|_| panic!("{action_name} should be allowlisted"));
+        assert_eq!(
+            metadata.implementation_status,
+            ::local_control::ActionImplementationStatus::Implemented,
+            "{action_name} should be Implemented"
+        );
+    }
 }
 
 #[test]
