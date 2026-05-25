@@ -82,6 +82,20 @@ pub(crate) fn ensure_settings_allow_action(
             "inside-Warp local-control grants are not implemented",
         ));
     }
+    let allowed_contexts = action.metadata().allowed_invocation_contexts;
+    if !allowed_contexts.contains(&context) {
+        return Err(ControlError::new(
+            ErrorCode::ExecutionContextNotAllowed,
+            format!(
+                "{} is not available in the {} invocation context",
+                action.as_str(),
+                match context {
+                    InvocationContext::InsideWarp => "inside-Warp",
+                    InvocationContext::OutsideWarp => "outside-Warp",
+                }
+            ),
+        ));
+    }
     if !settings.outside_warp_control_enabled() {
         return Err(ControlError::new(
             ErrorCode::LocalControlDisabled,

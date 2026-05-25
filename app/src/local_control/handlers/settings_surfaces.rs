@@ -1,19 +1,23 @@
 use ::local_control::protocol::{
-    AppearanceStateResult, SettingGetParams, SettingGetResult, SettingListResult, SettingSummary,
-    ThemeListResult, ThemeSummary,
+    AppearanceFontSizeParams, AppearanceMutationResult, AppearanceSetParams, AppearanceStateResult,
+    AppearanceZoomParams, SettingGetParams, SettingGetResult, SettingListResult,
+    SettingMutationResult, SettingSetParams, SettingSummary, SettingToggleParams, SizeAdjustment,
+    ThemeListResult, ThemeSetParams, ThemeSummary,
 };
-use ::local_control::{ControlError, ErrorCode};
+use ::local_control::{ActionKind, ControlError, ErrorCode};
 use serde::Serialize;
 use serde_json::{json, Value};
 use settings::Setting as _;
+use warpui::accessibility::AccessibilityVerbosity;
 use warpui::{ModelContext, SingletonEntity};
 
 use crate::local_control::LocalControlBridge;
 use crate::settings::{
     derived_theme_kind, AccessibilitySettings, FontSettings, InputSettings, ThemeSettings,
 };
-use crate::themes::theme::ThemeKind;
+use crate::themes::theme::{SelectedSystemThemes, ThemeKind};
 use crate::user_config::WarpConfig;
+use crate::window_settings::ZoomLevel;
 use crate::WindowSettings;
 
 const ALLOWLISTED_SETTING_KEYS: &[&str] = &[
@@ -75,6 +79,54 @@ pub(crate) fn setting_get(
     to_control_data(setting_get_result(&params.key, ctx)?)
 }
 
+pub(crate) fn theme_set(
+    action: &::local_control::Action,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    let params = action.params_as::<ThemeSetParams>()?;
+    to_control_data(theme_set_result(params, ctx)?)
+}
+
+pub(crate) fn appearance_set(
+    action: &::local_control::Action,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    let params = action.params_as::<AppearanceSetParams>()?;
+    to_control_data(appearance_set_result(params, ctx)?)
+}
+
+pub(crate) fn appearance_font_size(
+    action: &::local_control::Action,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    let params = action.params_as::<AppearanceFontSizeParams>()?;
+    to_control_data(appearance_font_size_result(params, ctx)?)
+}
+
+pub(crate) fn appearance_zoom(
+    action: &::local_control::Action,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    let params = action.params_as::<AppearanceZoomParams>()?;
+    to_control_data(appearance_zoom_result(params, ctx)?)
+}
+
+pub(crate) fn setting_set(
+    action: &::local_control::Action,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    let params = action.params_as::<SettingSetParams>()?;
+    to_control_data(setting_set_result(params, ctx)?)
+}
+
+pub(crate) fn setting_toggle(
+    action: &::local_control::Action,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    let params = action.params_as::<SettingToggleParams>()?;
+    to_control_data(setting_toggle_result(params, ctx)?)
+}
+
 pub(crate) fn theme_list_result(
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<ThemeListResult, ControlError> {
@@ -125,6 +177,394 @@ pub(crate) fn setting_get_result(
     Ok(SettingGetResult {
         setting: setting_summary_for_key(key, ctx)?,
     })
+}
+
+pub(crate) fn theme_set_result(
+    params: ThemeSetParams,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<AppearanceMutationResult, ControlError> {
+    let theme = theme_kind_for_name(&params.name, ctx)?;
+    let changed = ThemeSettings::handle(ctx)
+        .update(ctx, |theme_settings, ctx| {
+            let changed = *theme_settings.use_system_theme.value()
+                || *theme_settings.theme_kind.value() != theme;
+            theme_settings.use_system_theme.set_value(false, ctx)?;
+            theme_settings.theme_kind.set_value(theme, ctx)?;
+            Ok::<_, anyhow::Error>(changed)
+        })
+        .map_err(|err| settings_write_error(ActionKind::ThemeSet, err))?;
+    Ok(AppearanceMutationResult { changed })
+}
+
+pub(crate) fn appearance_set_result(
+    params: AppearanceSetParams,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<AppearanceMutationResult, ControlError> {
+    if params.theme.is_none()
+        && params.follow_system_theme.is_none()
+        && params.light_theme.is_none()
+        && params.dark_theme.is_none()
+    {
+        return Err(ControlError::new(
+            ErrorCode::InvalidParams,
+            "appearance.set requires at least one appearance field",
+        ));
+    }
+    let theme = params
+        .theme
+        .as_deref()
+        .map(|name| theme_kind_for_name(name, ctx))
+        .transpose()?;
+    let light_theme = params
+        .light_theme
+        .as_deref()
+        .map(|name| theme_kind_for_name(name, ctx))
+        .transpose()?;
+    let dark_theme = params
+        .dark_theme
+        .as_deref()
+        .map(|name| theme_kind_for_name(name, ctx))
+        .transpose()?;
+    let changed = ThemeSettings::handle(ctx)
+        .update(ctx, |theme_settings, ctx| {
+            let mut changed = false;
+            if let Some(follow_system_theme) = params.follow_system_theme {
+                changed |= *theme_settings.use_system_theme.value() != follow_system_theme;
+                theme_settings
+                    .use_system_theme
+                    .set_value(follow_system_theme, ctx)?;
+            }
+            if let Some(theme) = theme {
+                changed |= *theme_settings.use_system_theme.value();
+                changed |= *theme_settings.theme_kind.value() != theme;
+                theme_settings.use_system_theme.set_value(false, ctx)?;
+                theme_settings.theme_kind.set_value(theme, ctx)?;
+            }
+            if light_theme.is_some() || dark_theme.is_some() {
+                let current = theme_settings.selected_system_themes.value().clone();
+                let next = SelectedSystemThemes {
+                    light: light_theme.unwrap_or_else(|| current.light.clone()),
+                    dark: dark_theme.unwrap_or_else(|| current.dark.clone()),
+                };
+                changed |= current != next;
+                theme_settings.selected_system_themes.set_value(next, ctx)?;
+            }
+            Ok::<_, anyhow::Error>(changed)
+        })
+        .map_err(|err| settings_write_error(ActionKind::AppearanceSet, err))?;
+    Ok(AppearanceMutationResult { changed })
+}
+
+pub(crate) fn appearance_font_size_result(
+    params: AppearanceFontSizeParams,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<AppearanceMutationResult, ControlError> {
+    let current = *FontSettings::as_ref(ctx).monospace_font_size.value();
+    let next = match params.adjustment {
+        SizeAdjustment::Increase => (current + 1.0).clamp(5.0, 25.0),
+        SizeAdjustment::Decrease => (current - 1.0).clamp(5.0, 25.0),
+        SizeAdjustment::Reset => crate::settings::MonospaceFontSize::default_value(),
+        SizeAdjustment::Set => {
+            let value = params.value.ok_or_else(|| {
+                ControlError::new(
+                    ErrorCode::InvalidParams,
+                    "appearance.font_size set requires a value",
+                )
+            })?;
+            valid_font_size(value)?
+        }
+    };
+    let changed = current != next;
+    FontSettings::handle(ctx)
+        .update(ctx, |font_settings, ctx| {
+            font_settings.monospace_font_size.set_value(next, ctx)
+        })
+        .map_err(|err| settings_write_error(ActionKind::AppearanceFontSize, err))?;
+    Ok(AppearanceMutationResult { changed })
+}
+
+pub(crate) fn appearance_zoom_result(
+    params: AppearanceZoomParams,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<AppearanceMutationResult, ControlError> {
+    let current = *WindowSettings::as_ref(ctx).zoom_level.value();
+    let next = match params.adjustment {
+        SizeAdjustment::Increase => adjacent_zoom_level(current, true),
+        SizeAdjustment::Decrease => adjacent_zoom_level(current, false),
+        SizeAdjustment::Reset => ZoomLevel::default_value(),
+        SizeAdjustment::Set => {
+            let value = params.value.ok_or_else(|| {
+                ControlError::new(
+                    ErrorCode::InvalidParams,
+                    "appearance.zoom set requires a value",
+                )
+            })?;
+            valid_zoom_level(value)?
+        }
+    };
+    let changed = current != next;
+    WindowSettings::handle(ctx)
+        .update(ctx, |window_settings, ctx| {
+            window_settings.zoom_level.set_value(next, ctx)
+        })
+        .map_err(|err| settings_write_error(ActionKind::AppearanceZoom, err))?;
+    Ok(AppearanceMutationResult { changed })
+}
+
+pub(crate) fn setting_set_result(
+    params: SettingSetParams,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<SettingMutationResult, ControlError> {
+    set_allowlisted_setting(&params.key, params.value, ctx)?;
+    Ok(SettingMutationResult {
+        setting: setting_summary_for_key(&params.key, ctx)?,
+    })
+}
+
+pub(crate) fn setting_toggle_result(
+    params: SettingToggleParams,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<SettingMutationResult, ControlError> {
+    let current = setting_summary_for_key(&params.key, ctx)?;
+    let Some(value) = current.value.as_bool() else {
+        return Err(ControlError::new(
+            ErrorCode::InvalidParams,
+            format!(
+                "{} is not a boolean setting and cannot be toggled",
+                params.key
+            ),
+        ));
+    };
+    set_allowlisted_setting(&params.key, serde_json::json!(!value), ctx)?;
+    Ok(SettingMutationResult {
+        setting: setting_summary_for_key(&params.key, ctx)?,
+    })
+}
+
+fn set_allowlisted_setting(
+    key: &str,
+    value: Value,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<(), ControlError> {
+    match key {
+        "appearance.themes.theme" => theme_set_result(
+            ThemeSetParams {
+                name: string_setting_value(key, &value)?,
+            },
+            ctx,
+        )
+        .map(|_| ()),
+        "appearance.themes.system_theme" => {
+            let enabled = bool_setting_value(key, &value)?;
+            ThemeSettings::handle(ctx)
+                .update(ctx, |settings, ctx| {
+                    settings.use_system_theme.set_value(enabled, ctx)
+                })
+                .map_err(|err| settings_write_error(ActionKind::SettingSet, err))
+        }
+        "appearance.themes.light_theme" => {
+            let theme = theme_kind_for_name(&string_setting_value(key, &value)?, ctx)?;
+            ThemeSettings::handle(ctx)
+                .update(ctx, |settings, ctx| {
+                    let current = settings.selected_system_themes.value().clone();
+                    settings.selected_system_themes.set_value(
+                        SelectedSystemThemes {
+                            light: theme,
+                            dark: current.dark,
+                        },
+                        ctx,
+                    )
+                })
+                .map_err(|err| settings_write_error(ActionKind::SettingSet, err))
+        }
+        "appearance.themes.dark_theme" => {
+            let theme = theme_kind_for_name(&string_setting_value(key, &value)?, ctx)?;
+            ThemeSettings::handle(ctx)
+                .update(ctx, |settings, ctx| {
+                    let current = settings.selected_system_themes.value().clone();
+                    settings.selected_system_themes.set_value(
+                        SelectedSystemThemes {
+                            light: current.light,
+                            dark: theme,
+                        },
+                        ctx,
+                    )
+                })
+                .map_err(|err| settings_write_error(ActionKind::SettingSet, err))
+        }
+        "appearance.text.font_name" => {
+            let font_name = string_setting_value(key, &value)?;
+            if font_name.trim().is_empty() {
+                return Err(ControlError::new(
+                    ErrorCode::InvalidParams,
+                    "appearance.text.font_name cannot be empty",
+                ));
+            }
+            FontSettings::handle(ctx)
+                .update(ctx, |settings, ctx| {
+                    settings.monospace_font_name.set_value(font_name, ctx)
+                })
+                .map_err(|err| settings_write_error(ActionKind::SettingSet, err))
+        }
+        "appearance.text.font_size" => {
+            let font_size = valid_font_size(u32_setting_value(key, &value)?)?;
+            FontSettings::handle(ctx)
+                .update(ctx, |settings, ctx| {
+                    settings.monospace_font_size.set_value(font_size, ctx)
+                })
+                .map_err(|err| settings_write_error(ActionKind::SettingSet, err))
+        }
+        "appearance.window.zoom_level" => {
+            let zoom_level = valid_zoom_level(u32_setting_value(key, &value)?)?;
+            WindowSettings::handle(ctx)
+                .update(ctx, |settings, ctx| {
+                    settings.zoom_level.set_value(zoom_level, ctx)
+                })
+                .map_err(|err| settings_write_error(ActionKind::SettingSet, err))
+        }
+        "terminal.input.syntax_highlighting" => {
+            let enabled = bool_setting_value(key, &value)?;
+            InputSettings::handle(ctx)
+                .update(ctx, |settings, ctx| {
+                    settings.syntax_highlighting.set_value(enabled, ctx)
+                })
+                .map_err(|err| settings_write_error(ActionKind::SettingSet, err))
+        }
+        "terminal.input.error_underlining_enabled" => {
+            let enabled = bool_setting_value(key, &value)?;
+            InputSettings::handle(ctx)
+                .update(ctx, |settings, ctx| {
+                    settings.error_underlining.set_value(enabled, ctx)
+                })
+                .map_err(|err| settings_write_error(ActionKind::SettingSet, err))
+        }
+        "accessibility.accessibility_verbosity" => {
+            let verbosity = accessibility_verbosity_value(key, &value)?;
+            AccessibilitySettings::handle(ctx)
+                .update(ctx, |settings, ctx| {
+                    settings.a11y_verbosity.set_value(verbosity, ctx)
+                })
+                .map_err(|err| settings_write_error(ActionKind::SettingSet, err))
+        }
+        _ => Err(rejected_setting_key(key)),
+    }
+}
+
+fn theme_kind_for_name(
+    name: &str,
+    ctx: &ModelContext<LocalControlBridge>,
+) -> Result<ThemeKind, ControlError> {
+    let matches = WarpConfig::as_ref(ctx)
+        .theme_config()
+        .theme_items()
+        .filter_map(|(kind, _)| (public_theme_name(kind) == name).then_some(kind.clone()))
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [theme] => Ok(theme.clone()),
+        [] => Err(ControlError::new(
+            ErrorCode::InvalidParams,
+            format!("{name} is not an available theme"),
+        )),
+        _ => Err(ControlError::new(
+            ErrorCode::InvalidParams,
+            format!("{name} matches multiple themes"),
+        )),
+    }
+}
+
+fn valid_font_size(value: u32) -> Result<f32, ControlError> {
+    if (5..=25).contains(&value) {
+        return Ok(value as f32);
+    }
+    Err(ControlError::new(
+        ErrorCode::InvalidParams,
+        "font size must be between 5 and 25",
+    ))
+}
+
+fn valid_zoom_level(value: u32) -> Result<u16, ControlError> {
+    let value = u16::try_from(value).map_err(|err| {
+        ControlError::with_details(
+            ErrorCode::InvalidParams,
+            "zoom level is outside the supported range",
+            err.to_string(),
+        )
+    })?;
+    if ZoomLevel::VALUES.contains(&value) {
+        return Ok(value);
+    }
+    Err(ControlError::new(
+        ErrorCode::InvalidParams,
+        "zoom level must be one of the supported zoom percentages",
+    ))
+}
+
+fn adjacent_zoom_level(current: u16, increase: bool) -> u16 {
+    let current_index = ZoomLevel::VALUES
+        .iter()
+        .position(|zoom| *zoom == current)
+        .unwrap_or_else(|| {
+            ZoomLevel::VALUES
+                .iter()
+                .position(|zoom| *zoom == ZoomLevel::default_value())
+                .unwrap_or(0)
+        });
+    let next_index = if increase {
+        (current_index + 1).min(ZoomLevel::VALUES.len() - 1)
+    } else {
+        current_index.saturating_sub(1)
+    };
+    ZoomLevel::VALUES[next_index]
+}
+
+fn bool_setting_value(key: &str, value: &Value) -> Result<bool, ControlError> {
+    value.as_bool().ok_or_else(|| {
+        ControlError::new(
+            ErrorCode::InvalidParams,
+            format!("{key} requires a boolean value"),
+        )
+    })
+}
+
+fn string_setting_value(key: &str, value: &Value) -> Result<String, ControlError> {
+    value.as_str().map(str::to_owned).ok_or_else(|| {
+        ControlError::new(
+            ErrorCode::InvalidParams,
+            format!("{key} requires a string value"),
+        )
+    })
+}
+
+fn u32_setting_value(key: &str, value: &Value) -> Result<u32, ControlError> {
+    if let Some(value) = value.as_u64().and_then(|value| u32::try_from(value).ok()) {
+        return Ok(value);
+    }
+    Err(ControlError::new(
+        ErrorCode::InvalidParams,
+        format!("{key} requires a non-negative integer value"),
+    ))
+}
+
+fn accessibility_verbosity_value(
+    key: &str,
+    value: &Value,
+) -> Result<AccessibilityVerbosity, ControlError> {
+    match string_setting_value(key, value)?.as_str() {
+        "Verbose" | "verbose" | "VERBOSE" => Ok(AccessibilityVerbosity::Verbose),
+        "Concise" | "concise" | "CONCISE" => Ok(AccessibilityVerbosity::Concise),
+        _ => Err(ControlError::new(
+            ErrorCode::InvalidParams,
+            "accessibility.accessibility_verbosity must be Verbose or Concise",
+        )),
+    }
+}
+
+fn settings_write_error(action: ActionKind, err: anyhow::Error) -> ControlError {
+    ControlError::with_details(
+        ErrorCode::Internal,
+        format!("{} failed to update app settings", action.as_str()),
+        err.to_string(),
+    )
 }
 
 pub(crate) fn rejected_setting_key(key: &str) -> ControlError {
