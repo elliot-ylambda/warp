@@ -541,9 +541,15 @@ impl ActionKind {
 
     fn implementation_status(self) -> ActionImplementationStatus {
         match self {
-            Self::InstanceList | Self::AppPing | Self::AppVersion | Self::TabCreate => {
-                ActionImplementationStatus::Implemented
-            }
+            Self::InstanceList
+            | Self::AppPing
+            | Self::AppVersion
+            | Self::TabCreate
+            | Self::DriveObjectCreate
+            | Self::DriveObjectUpdate
+            | Self::DriveObjectDelete
+            | Self::DriveObjectInsert
+            | Self::DriveObjectShareToTeam => ActionImplementationStatus::Implemented,
             Self::InstanceInspect
             | Self::AppActive
             | Self::AppFocus
@@ -635,11 +641,6 @@ impl ActionKind {
             | Self::DriveNotebookOpen
             | Self::DriveEnvVarCollectionOpen
             | Self::DriveObjectShareOpen
-            | Self::DriveObjectCreate
-            | Self::DriveObjectUpdate
-            | Self::DriveObjectDelete
-            | Self::DriveObjectInsert
-            | Self::DriveObjectShareToTeam
             | Self::DriveWorkflowRun => ActionImplementationStatus::Stub,
         }
     }

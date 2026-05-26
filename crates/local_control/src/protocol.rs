@@ -1,4 +1,5 @@
 //! Wire protocol envelopes and error types for Warp local control.
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -176,6 +177,8 @@ pub struct FileOpenParams {
 pub struct DriveObjectCreateParams {
     pub object_type: DriveObjectType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_file: Option<String>,
@@ -212,6 +215,30 @@ pub struct WorkflowRunParams {
 pub struct WorkflowArgument {
     pub name: String,
     pub value: String,
+}
+
+/// Stable summary returned after a Drive object mutation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriveObjectSummary {
+    pub object_type: DriveObjectType,
+    pub id: DriveObjectId,
+    pub name: String,
+}
+
+/// Structured audit payload attached to high-risk Drive mutation responses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriveMutationAudit {
+    pub action: String,
+    pub authenticated_user_subject: String,
+    pub permission_category: PermissionCategory,
+}
+
+/// Result payload for high-risk Drive object mutations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriveMutationResult {
+    pub object: DriveObjectSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<DriveMutationAudit>,
 }
 
 /// Mode accepted by `tab.activate`.
@@ -278,6 +305,19 @@ impl Action {
             kind,
             params: serde_json::Value::Object(Default::default()),
         }
+    }
+
+    pub fn params_as<T>(&self) -> Result<T, ControlError>
+    where
+        T: DeserializeOwned,
+    {
+        serde_json::from_value(self.params.clone()).map_err(|err| {
+            ControlError::with_details(
+                ErrorCode::InvalidParams,
+                format!("{} parameters are invalid", self.kind.as_str()),
+                err.to_string(),
+            )
+        })
     }
 }
 

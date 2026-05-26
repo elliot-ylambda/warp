@@ -23,6 +23,7 @@ fn settings_with_values(
     outside_enabled: bool,
     outside_metadata_reads: bool,
     outside_app_state_mutations: bool,
+    outside_underlying_data_mutations: bool,
 ) -> LocalControlSettings {
     LocalControlSettings {
         allow_outside_warp_control: AllowOutsideWarpControl::new(Some(outside_enabled)),
@@ -38,16 +39,37 @@ fn settings_with_values(
         allow_outside_warp_metadata_configuration_mutations:
             AllowOutsideWarpMetadataConfigurationMutations::new(Some(false)),
         allow_outside_warp_underlying_data_mutations: AllowOutsideWarpUnderlyingDataMutations::new(
-            Some(false),
+            Some(outside_underlying_data_mutations),
         ),
     }
+}
+
+#[test]
+fn drive_object_mutations_require_underlying_data_mutation_permission() {
+    let settings = settings_with_values(true, true, true, false);
+
+    let err = ensure_settings_allow_action(
+        &settings,
+        InvocationContext::OutsideWarp,
+        ActionKind::DriveObjectCreate,
+    )
+    .expect_err("underlying-data mutation permission is disabled");
+    assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+
+    let settings = settings_with_values(true, true, true, true);
+    ensure_settings_allow_action(
+        &settings,
+        InvocationContext::OutsideWarp,
+        ActionKind::DriveObjectCreate,
+    )
+    .expect("underlying-data mutation permission allows the action helper");
 }
 
 fn settings_with_outside_warp(
     outside_control: bool,
     outside_app_state_mutations: bool,
 ) -> LocalControlSettings {
-    settings_with_values(outside_control, false, outside_app_state_mutations)
+    settings_with_values(outside_control, false, outside_app_state_mutations, false)
 }
 
 #[test]
@@ -123,6 +145,11 @@ fn capabilities_advertises_only_first_slice_core_actions() {
             ActionKind::AppPing,
             ActionKind::AppVersion,
             ActionKind::TabCreate,
+            ActionKind::DriveObjectCreate,
+            ActionKind::DriveObjectUpdate,
+            ActionKind::DriveObjectDelete,
+            ActionKind::DriveObjectInsert,
+            ActionKind::DriveObjectShareToTeam,
         ]
     );
 }
@@ -164,7 +191,7 @@ fn feature_flag_disabled_denies_local_control() {
 
 #[test]
 fn disabled_outside_warp_denies_before_granular_permission() {
-    let settings = settings_with_values(false, true, true);
+    let settings = settings_with_values(false, true, true, true);
 
     let err = ensure_settings_allow_action(
         &settings,
@@ -177,7 +204,7 @@ fn disabled_outside_warp_denies_before_granular_permission() {
 
 #[test]
 fn inside_warp_context_is_not_implemented() {
-    let settings = settings_with_values(true, true, true);
+    let settings = settings_with_values(true, true, true, true);
 
     let err = ensure_settings_allow_action(
         &settings,
@@ -190,7 +217,7 @@ fn inside_warp_context_is_not_implemented() {
 
 #[test]
 fn disabled_granular_permission_denies_with_insufficient_permissions() {
-    let settings = settings_with_values(true, true, false);
+    let settings = settings_with_values(true, true, false, false);
 
     let err = ensure_settings_allow_action(
         &settings,
