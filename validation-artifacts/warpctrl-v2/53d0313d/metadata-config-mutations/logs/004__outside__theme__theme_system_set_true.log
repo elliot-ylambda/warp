@@ -1,0 +1,10 @@
+command: $WARPCTRL --output-format json theme system-set true
+exit_code: 0
+
+[stdout]
+{
+  "action": "theme.system.set",
+  "ok": true
+}
+
+[stderr]

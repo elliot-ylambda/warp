@@ -1,0 +1,14 @@
+command: $WARPCTRL --output-format json setting toggle appearance.themes.system_theme
+exit_code: 0
+
+[stdout]
+{
+  "action": "setting.toggle",
+  "setting": {
+    "key": "appearance.themes.system_theme",
+    "value": true,
+    "value_type": "bool"
+  }
+}
+
+[stderr]

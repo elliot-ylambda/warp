@@ -1,0 +1,10 @@
+command: $WARPCTRL --output-format json appearance zoom-decrease
+exit_code: 0
+
+[stdout]
+{
+  "action": "appearance.zoom.decrease",
+  "ok": true
+}
+
+[stderr]

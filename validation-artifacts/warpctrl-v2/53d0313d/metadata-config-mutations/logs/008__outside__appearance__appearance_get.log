@@ -1,0 +1,14 @@
+command: $WARPCTRL --output-format json appearance get
+exit_code: 0
+
+[stdout]
+{
+  "dark_theme": "Dark",
+  "follow_system_theme": false,
+  "font_size": 13,
+  "light_theme": "Light",
+  "theme": "Adeberry",
+  "ui_zoom_percent": 100
+}
+
+[stderr]

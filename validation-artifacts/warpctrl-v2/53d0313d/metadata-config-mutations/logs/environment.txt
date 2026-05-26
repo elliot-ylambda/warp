@@ -1,0 +1,9 @@
+repository=/workspace/warp
+validation_ref=origin/zach/warpctrl-validation/53d0313d
+exact_sha=53d0313df1f712cf98b1c53e9272c588141da350
+build_command=cargo build --manifest-path /workspace/warp/Cargo.toml -p warp --bin warp-oss --bin warpctrl --features warp_control_cli
+app_binary=/workspace/warp/target/debug/warp-oss
+warpctrl_binary=/workspace/warp/target/debug/warpctrl
+WARPCTRL=/workspace/warp/target/debug/warpctrl
+app_channel=oss
+runtime_permissions=LocalControlAllowOutsideWarp=true,LocalControlOutsideWarpMetadataReads=true,LocalControlOutsideWarpMetadataConfigurationMutations=true

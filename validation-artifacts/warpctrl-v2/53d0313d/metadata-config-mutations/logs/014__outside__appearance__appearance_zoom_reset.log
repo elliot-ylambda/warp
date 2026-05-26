@@ -1,0 +1,10 @@
+command: $WARPCTRL --output-format json appearance zoom-reset
+exit_code: 0
+
+[stdout]
+{
+  "action": "appearance.zoom.reset",
+  "ok": true
+}
+
+[stderr]

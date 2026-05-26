@@ -1,0 +1,14 @@
+command: $WARPCTRL --output-format json setting set appearance.window.zoom_level 110
+exit_code: 0
+
+[stdout]
+{
+  "action": "setting.set",
+  "setting": {
+    "key": "appearance.window.zoom_level",
+    "value": 110,
+    "value_type": "number"
+  }
+}
+
+[stderr]

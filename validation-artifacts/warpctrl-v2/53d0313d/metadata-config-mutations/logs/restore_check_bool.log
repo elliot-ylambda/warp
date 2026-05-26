@@ -1,0 +1,13 @@
+command: $WARPCTRL --output-format json setting get appearance.themes.system_theme
+exit_code: 0
+
+[stdout]
+{
+  "setting": {
+    "key": "appearance.themes.system_theme",
+    "value": true,
+    "value_type": "bool"
+  }
+}
+
+[stderr]

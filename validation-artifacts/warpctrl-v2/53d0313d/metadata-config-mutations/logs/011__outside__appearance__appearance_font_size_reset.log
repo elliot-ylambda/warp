@@ -1,0 +1,10 @@
+command: $WARPCTRL --output-format json appearance font-size-reset
+exit_code: 0
+
+[stdout]
+{
+  "action": "appearance.font_size.reset",
+  "ok": true
+}
+
+[stderr]

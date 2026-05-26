@@ -1,0 +1,12 @@
+command: $WARPCTRL --output-format json theme get
+exit_code: 0
+
+[stdout]
+{
+  "dark_theme": "Dark",
+  "follow_system_theme": false,
+  "light_theme": "Light",
+  "name": "Dark"
+}
+
+[stderr]

@@ -1,0 +1,10 @@
+command: $WARPCTRL --output-format json theme dark-set Dark
+exit_code: 0
+
+[stdout]
+{
+  "action": "theme.dark.set",
+  "ok": true
+}
+
+[stderr]

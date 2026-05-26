@@ -1,0 +1,13 @@
+command: $WARPCTRL --output-format json keybinding get copy
+exit_code: 1
+
+[stdout]
+{
+  "ok": false,
+  "error": {
+    "code": "missing_target",
+    "message": "keybinding.get could not find copy"
+  }
+}
+
+[stderr]

@@ -1,0 +1,10 @@
+command: $WARPCTRL --output-format json appearance font-size-decrease
+exit_code: 0
+
+[stdout]
+{
+  "action": "appearance.font_size.decrease",
+  "ok": true
+}
+
+[stderr]
