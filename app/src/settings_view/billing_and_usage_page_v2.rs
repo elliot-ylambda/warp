@@ -1681,10 +1681,14 @@ impl BillingAndUsagePageV2View {
             UserWorkspaces::as_ref(app).current_team(),
         ) {
             let workspace_bonus_credits = ai_model.total_workspace_bonus_credits_remaining(ws.uid);
+            let is_free_solo_user = ws.billing_metadata.customer_type == CustomerType::Free
+                && team.billing_metadata.customer_type == CustomerType::Free
+                && ws.members.len() <= 1
+                && team.members.len() <= 1;
             let is_payg_zero = ws.billing_metadata.is_enterprise_pay_as_you_go_enabled()
                 && workspace_bonus_credits == 0;
 
-            if !is_payg_zero {
+            if !is_free_solo_user && !is_payg_zero {
                 let current_user_is_admin = {
                     let email = AuthStateProvider::as_ref(app)
                         .get()
