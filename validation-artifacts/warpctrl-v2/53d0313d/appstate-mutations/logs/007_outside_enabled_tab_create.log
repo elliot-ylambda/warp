@@ -1,0 +1,15 @@
+{
+  "action": "tab.create",
+  "created": true,
+  "instance_id": "inst_8fffb17471bb4b2cb780b83f7c7bf405",
+  "tab": {
+    "active_index": 1,
+    "count": 2,
+    "previous_count": 1
+  },
+  "window": {
+    "id": "0",
+    "selector": "active"
+  }
+}
+EXIT_CODE=0

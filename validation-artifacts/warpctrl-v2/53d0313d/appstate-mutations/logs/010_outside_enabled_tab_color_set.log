@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "error": {
+    "code": "invalid_params",
+    "message": "#ff00ff is not a supported tab color"
+  }
+}
+EXIT_CODE=1
