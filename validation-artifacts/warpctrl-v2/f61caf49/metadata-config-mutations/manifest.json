@@ -1,0 +1,1036 @@
+{
+  "agent_name": "metadata-config-mutations",
+  "validated_sha": "f61caf49400dc5c0d37d57a553d27733700e5204",
+  "expected_sha": "f61caf49400dc5c0d37d57a553d27733700e5204",
+  "validation_ref": "zach/warpctrl-validation/f61caf49",
+  "artifact_dir": "validation-artifacts/warpctrl-v2/f61caf49/metadata-config-mutations",
+  "environment": {
+    "display": ":99",
+    "home": "/tmp/warpctrl-validation/metadata-config-mutations-run/home",
+    "xdg_config_home": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config",
+    "xdg_state_home": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_state",
+    "warp_data_profile": "metadata-config-mutations",
+    "local_control_discovery_dir": "/tmp/warpctrl-validation/metadata-config-mutations-run/local_control_discovery",
+    "screenshot_strategy": "paired terminal transcript PNG plus X11 root-window UI PNG; no graphical terminal/window manager/screenshot utilities are installed in the sandbox, so a live staggered terminal+Warp screenshot is blocked."
+  },
+  "permission_state": {
+    "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+    "outside_warp_control": true,
+    "outside_warp_metadata_reads": true,
+    "outside_warp_metadata_configuration_mutations": true,
+    "outside_warp_app_state_mutations": false,
+    "outside_warp_underlying_data_reads": false,
+    "outside_warp_underlying_data_mutations": false,
+    "inside_warp_authenticated_user_actions": false,
+    "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+  },
+  "commands": [
+    {
+      "ordinal": 1,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme list",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show the JSON theme catalog in the CLI transcript; no app state should change.",
+      "expected_result": "Theme catalog is returned as JSON with available theme names.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/001__outside-paired__metadata__theme_list.stdout.json",
+      "stderr_log": "logs/001__outside-paired__metadata__theme_list.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/001__outside-paired__metadata__theme_list__terminal.png",
+        "ui_before": null,
+        "ui_after": null
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "No visible Warp UI mutation expected; command output is the primary evidence.",
+        "observed_visual_effect": "No UI mutation captured for read-only command.",
+        "status": "pass",
+        "unexpected_ui_changes": "not applicable"
+      }
+    },
+    {
+      "ordinal": 2,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme get",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show the current theme state in the CLI transcript and keep Warp visible for context.",
+      "expected_result": "Current theme state is returned as JSON.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/002__outside-paired__metadata__theme_get.stdout.json",
+      "stderr_log": "logs/002__outside-paired__metadata__theme_get.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/002__outside-paired__metadata__theme_get__terminal.png",
+        "ui_before": null,
+        "ui_after": null
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "No visible Warp UI mutation expected; command output is the primary evidence.",
+        "observed_visual_effect": "No UI mutation captured for read-only command.",
+        "status": "pass",
+        "unexpected_ui_changes": "not applicable"
+      }
+    },
+    {
+      "ordinal": 3,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme set Adeberry",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Start with the Warp terminal visible, then set a non-current theme (Adeberry) so a background/color change can be seen.",
+      "expected_result": "Warp switches current theme to Adeberry.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/003__outside-paired__metadata__theme_set.stdout.json",
+      "stderr_log": "logs/003__outside-paired__metadata__theme_set.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/003__outside-paired__metadata__theme_set__terminal.png",
+        "ui_before": "screenshots/003__outside-paired__metadata__theme_set__ui_before.png",
+        "ui_after": "screenshots/003__outside-paired__metadata__theme_set__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Warp switches current theme to Adeberry.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=27.02. A visible screen change is measurable in the screenshots.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 4,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme system-set true",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Keep theme-sensitive Warp UI visible and toggle follow-system-theme on; persisted state is the key evidence because OS theme may match current colors.",
+      "expected_result": "follow_system_theme becomes true; visible colors may change depending on system theme.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/004__outside-paired__metadata__theme_system_set_true.stdout.json",
+      "stderr_log": "logs/004__outside-paired__metadata__theme_system_set_true.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/004__outside-paired__metadata__theme_system_set_true__terminal.png",
+        "ui_before": "screenshots/004__outside-paired__metadata__theme_system_set_true__ui_before.png",
+        "ui_after": "screenshots/004__outside-paired__metadata__theme_system_set_true__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "follow_system_theme becomes true; visible colors may change depending on system theme.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=190.06. A visible screen change is measurable in the screenshots.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 5,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme system-set false",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Keep theme-sensitive Warp UI visible and toggle follow-system-theme off; persisted state should change and UI should remain stable or return to selected theme.",
+      "expected_result": "follow_system_theme becomes false.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/005__outside-paired__metadata__theme_system_set_false.stdout.json",
+      "stderr_log": "logs/005__outside-paired__metadata__theme_system_set_false.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/005__outside-paired__metadata__theme_system_set_false__terminal.png",
+        "ui_before": "screenshots/005__outside-paired__metadata__theme_system_set_false__ui_before.png",
+        "ui_after": "screenshots/005__outside-paired__metadata__theme_system_set_false__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "follow_system_theme becomes false.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=190.06. A visible screen change is measurable in the screenshots.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 6,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme light-set Gruvbox Light",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show theme-sensitive UI and set the persisted light theme to Gruvbox Light; immediate visual change is only expected when following system light theme.",
+      "expected_result": "Light theme preference becomes Gruvbox Light.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/006__outside-paired__metadata__theme_light_set.stdout.json",
+      "stderr_log": "logs/006__outside-paired__metadata__theme_light_set.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/006__outside-paired__metadata__theme_light_set__terminal.png",
+        "ui_before": "screenshots/006__outside-paired__metadata__theme_light_set__ui_before.png",
+        "ui_after": "screenshots/006__outside-paired__metadata__theme_light_set__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Light theme preference becomes Gruvbox Light.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.00. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 7,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme dark-set Dark",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show theme-sensitive UI and set the persisted dark theme to Dark; immediate visual change is only expected when following system dark theme.",
+      "expected_result": "Dark theme preference becomes Dark.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/007__outside-paired__metadata__theme_dark_set.stdout.json",
+      "stderr_log": "logs/007__outside-paired__metadata__theme_dark_set.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/007__outside-paired__metadata__theme_dark_set__terminal.png",
+        "ui_before": "screenshots/007__outside-paired__metadata__theme_dark_set__ui_before.png",
+        "ui_after": "screenshots/007__outside-paired__metadata__theme_dark_set__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Dark theme preference becomes Dark.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.00. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 8,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json appearance get",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show current appearance state in the CLI transcript and use the visible Warp window as context.",
+      "expected_result": "Appearance state is returned as JSON.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/008__outside-paired__metadata__appearance_get.stdout.json",
+      "stderr_log": "logs/008__outside-paired__metadata__appearance_get.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/008__outside-paired__metadata__appearance_get__terminal.png",
+        "ui_before": null,
+        "ui_after": null
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "No visible Warp UI mutation expected; command output is the primary evidence.",
+        "observed_visual_effect": "No UI mutation captured for read-only command.",
+        "status": "pass",
+        "unexpected_ui_changes": "not applicable"
+      }
+    },
+    {
+      "ordinal": 9,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json appearance font-size-increase",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show terminal prompt/UI chrome before and after; text scale should increase by one step.",
+      "expected_result": "Terminal font size increases by one step.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/009__outside-paired__metadata__appearance_font_size_increase.stdout.json",
+      "stderr_log": "logs/009__outside-paired__metadata__appearance_font_size_increase.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/009__outside-paired__metadata__appearance_font_size_increase__terminal.png",
+        "ui_before": "screenshots/009__outside-paired__metadata__appearance_font_size_increase__ui_before.png",
+        "ui_after": "screenshots/009__outside-paired__metadata__appearance_font_size_increase__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Terminal font size increases by one step.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.01. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 10,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json appearance font-size-decrease",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show terminal prompt/UI chrome before and after; text scale should decrease by one step.",
+      "expected_result": "Terminal font size decreases by one step.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/010__outside-paired__metadata__appearance_font_size_decrease.stdout.json",
+      "stderr_log": "logs/010__outside-paired__metadata__appearance_font_size_decrease.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/010__outside-paired__metadata__appearance_font_size_decrease__terminal.png",
+        "ui_before": "screenshots/010__outside-paired__metadata__appearance_font_size_decrease__ui_before.png",
+        "ui_after": "screenshots/010__outside-paired__metadata__appearance_font_size_decrease__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Terminal font size decreases by one step.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.01. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 11,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json appearance font-size-reset",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show terminal prompt/UI chrome before and after; text scale should reset to default.",
+      "expected_result": "Terminal font size resets to default.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/011__outside-paired__metadata__appearance_font_size_reset.stdout.json",
+      "stderr_log": "logs/011__outside-paired__metadata__appearance_font_size_reset.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/011__outside-paired__metadata__appearance_font_size_reset__terminal.png",
+        "ui_before": "screenshots/011__outside-paired__metadata__appearance_font_size_reset__ui_before.png",
+        "ui_after": "screenshots/011__outside-paired__metadata__appearance_font_size_reset__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Terminal font size resets to default.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.00. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 12,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json appearance zoom-increase",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show enough UI chrome before and after; all UI scale should increase by one zoom step.",
+      "expected_result": "UI zoom increases by one step.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/012__outside-paired__metadata__appearance_zoom_increase.stdout.json",
+      "stderr_log": "logs/012__outside-paired__metadata__appearance_zoom_increase.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/012__outside-paired__metadata__appearance_zoom_increase__terminal.png",
+        "ui_before": "screenshots/012__outside-paired__metadata__appearance_zoom_increase__ui_before.png",
+        "ui_after": "screenshots/012__outside-paired__metadata__appearance_zoom_increase__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "UI zoom increases by one step.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.07. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 13,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json appearance zoom-decrease",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show enough UI chrome before and after; all UI scale should decrease by one zoom step.",
+      "expected_result": "UI zoom decreases by one step.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/013__outside-paired__metadata__appearance_zoom_decrease.stdout.json",
+      "stderr_log": "logs/013__outside-paired__metadata__appearance_zoom_decrease.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/013__outside-paired__metadata__appearance_zoom_decrease__terminal.png",
+        "ui_before": "screenshots/013__outside-paired__metadata__appearance_zoom_decrease__ui_before.png",
+        "ui_after": "screenshots/013__outside-paired__metadata__appearance_zoom_decrease__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "UI zoom decreases by one step.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.07. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 14,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json appearance zoom-reset",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show enough UI chrome before and after; UI zoom should reset to default.",
+      "expected_result": "UI zoom resets to default.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/014__outside-paired__metadata__appearance_zoom_reset.stdout.json",
+      "stderr_log": "logs/014__outside-paired__metadata__appearance_zoom_reset.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/014__outside-paired__metadata__appearance_zoom_reset__terminal.png",
+        "ui_before": "screenshots/014__outside-paired__metadata__appearance_zoom_reset__ui_before.png",
+        "ui_after": "screenshots/014__outside-paired__metadata__appearance_zoom_reset__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "UI zoom resets to default.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.00. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 15,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json setting list",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show allowlisted setting metadata in CLI transcript.",
+      "expected_result": "Allowlisted settings are returned as JSON.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/015__outside-paired__metadata__setting_list.stdout.json",
+      "stderr_log": "logs/015__outside-paired__metadata__setting_list.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/015__outside-paired__metadata__setting_list__terminal.png",
+        "ui_before": null,
+        "ui_after": null
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "No visible Warp UI mutation expected; command output is the primary evidence.",
+        "observed_visual_effect": "No UI mutation captured for read-only command.",
+        "status": "pass",
+        "unexpected_ui_changes": "not applicable"
+      }
+    },
+    {
+      "ordinal": 16,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json setting get appearance.text.font_size",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show the safe setting appearance.text.font_size in CLI transcript.",
+      "expected_result": "appearance.text.font_size value is returned as JSON.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/016__outside-paired__metadata__setting_get_font_size.stdout.json",
+      "stderr_log": "logs/016__outside-paired__metadata__setting_get_font_size.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/016__outside-paired__metadata__setting_get_font_size__terminal.png",
+        "ui_before": null,
+        "ui_after": null
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "No visible Warp UI mutation expected; command output is the primary evidence.",
+        "observed_visual_effect": "No UI mutation captured for read-only command.",
+        "status": "pass",
+        "unexpected_ui_changes": "not applicable"
+      }
+    },
+    {
+      "ordinal": 17,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json setting set appearance.text.font_size 15",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show terminal prompt/UI chrome and set appearance.text.font_size to 15; text size should visibly change.",
+      "expected_result": "appearance.text.font_size is set to 15.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/017__outside-paired__metadata__setting_set_font_size.stdout.json",
+      "stderr_log": "logs/017__outside-paired__metadata__setting_set_font_size.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/017__outside-paired__metadata__setting_set_font_size__terminal.png",
+        "ui_before": "screenshots/017__outside-paired__metadata__setting_set_font_size__ui_before.png",
+        "ui_after": "screenshots/017__outside-paired__metadata__setting_set_font_size__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "appearance.text.font_size is set to 15.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.01. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 18,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json setting toggle appearance.themes.system_theme",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show theme-sensitive UI and toggle appearance.themes.system_theme; persisted state should flip and UI may change if system theme differs.",
+      "expected_result": "appearance.themes.system_theme boolean value toggles.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/018__outside-paired__metadata__setting_toggle_system_theme.stdout.json",
+      "stderr_log": "logs/018__outside-paired__metadata__setting_toggle_system_theme.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/018__outside-paired__metadata__setting_toggle_system_theme__terminal.png",
+        "ui_before": "screenshots/018__outside-paired__metadata__setting_toggle_system_theme__ui_before.png",
+        "ui_after": "screenshots/018__outside-paired__metadata__setting_toggle_system_theme__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "appearance.themes.system_theme boolean value toggles.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=170.35. A visible screen change is measurable in the screenshots.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 19,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json keybinding list",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show keybinding metadata in CLI transcript; no UI mutation expected.",
+      "expected_result": "Keybinding list is returned as JSON.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": false,
+      "stdout_log": "logs/019__outside-paired__metadata__keybinding_list.stdout.json",
+      "stderr_log": "logs/019__outside-paired__metadata__keybinding_list.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/019__outside-paired__metadata__keybinding_list__terminal.png",
+        "ui_before": null,
+        "ui_after": null
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "No visible Warp UI mutation expected; command output is the primary evidence.",
+        "observed_visual_effect": "No UI mutation captured for read-only command.",
+        "status": "pass",
+        "unexpected_ui_changes": "not applicable"
+      }
+    },
+    {
+      "ordinal": 20,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json keybinding get copy",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show the copy keybinding metadata in CLI transcript; no UI mutation expected.",
+      "expected_result": "The copy keybinding metadata is returned as JSON.",
+      "actual_result": "Command failed with JSON error code missing_target: keybinding.get could not find copy",
+      "exit_code": 1,
+      "status": "fail",
+      "restore_command": false,
+      "stdout_log": "logs/020__outside-paired__metadata__keybinding_get_copy.stdout.json",
+      "stderr_log": "logs/020__outside-paired__metadata__keybinding_get_copy.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/020__outside-paired__metadata__keybinding_get_copy__terminal.png",
+        "ui_before": null,
+        "ui_after": null
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "No visible Warp UI mutation expected; command output is the primary evidence.",
+        "observed_visual_effect": "No UI mutation captured for read-only command.",
+        "status": "fail",
+        "unexpected_ui_changes": "not applicable"
+      }
+    },
+    {
+      "ordinal": 21,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme set Dark",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Restore original current theme and record the UI returning toward its original colors.",
+      "expected_result": "Current theme restored to Dark.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": true,
+      "stdout_log": "logs/021__outside-paired__restore__restore_theme.stdout.json",
+      "stderr_log": "logs/021__outside-paired__restore__restore_theme.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/021__outside-paired__restore__restore_theme__terminal.png",
+        "ui_before": "screenshots/021__outside-paired__restore__restore_theme__ui_before.png",
+        "ui_after": "screenshots/021__outside-paired__restore__restore_theme__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Current theme restored to Dark.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=196.97. A visible screen change is measurable in the screenshots.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 22,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme system-set false",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Restore original follow-system-theme state.",
+      "expected_result": "Original follow-system-theme state is restored.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": true,
+      "stdout_log": "logs/022__outside-paired__restore__restore_system_theme.stdout.json",
+      "stderr_log": "logs/022__outside-paired__restore__restore_system_theme.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/022__outside-paired__restore__restore_system_theme__terminal.png",
+        "ui_before": "screenshots/022__outside-paired__restore__restore_system_theme__ui_before.png",
+        "ui_after": "screenshots/022__outside-paired__restore__restore_system_theme__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Original follow-system-theme state is restored.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.00. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 23,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme light-set Light",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Restore original light theme preference.",
+      "expected_result": "Original light theme preference is restored.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": true,
+      "stdout_log": "logs/023__outside-paired__restore__restore_light_theme.stdout.json",
+      "stderr_log": "logs/023__outside-paired__restore__restore_light_theme.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/023__outside-paired__restore__restore_light_theme__terminal.png",
+        "ui_before": null,
+        "ui_after": null
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "No visible Warp UI mutation expected; command output is the primary evidence.",
+        "observed_visual_effect": "No UI mutation captured for read-only command.",
+        "status": "pass",
+        "unexpected_ui_changes": "not applicable"
+      }
+    },
+    {
+      "ordinal": 24,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json theme dark-set Dark",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Restore original dark theme preference.",
+      "expected_result": "Original dark theme preference is restored.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": true,
+      "stdout_log": "logs/024__outside-paired__restore__restore_dark_theme.stdout.json",
+      "stderr_log": "logs/024__outside-paired__restore__restore_dark_theme.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/024__outside-paired__restore__restore_dark_theme__terminal.png",
+        "ui_before": null,
+        "ui_after": null
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "No visible Warp UI mutation expected; command output is the primary evidence.",
+        "observed_visual_effect": "No UI mutation captured for read-only command.",
+        "status": "pass",
+        "unexpected_ui_changes": "not applicable"
+      }
+    },
+    {
+      "ordinal": 25,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json setting set appearance.text.font_size 13",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Restore original safe font-size setting.",
+      "expected_result": "Original font-size setting is restored.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": true,
+      "stdout_log": "logs/025__outside-paired__restore__restore_font_size_setting.stdout.json",
+      "stderr_log": "logs/025__outside-paired__restore__restore_font_size_setting.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/025__outside-paired__restore__restore_font_size_setting__terminal.png",
+        "ui_before": "screenshots/025__outside-paired__restore__restore_font_size_setting__ui_before.png",
+        "ui_after": "screenshots/025__outside-paired__restore__restore_font_size_setting__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Original font-size setting is restored.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.01. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    },
+    {
+      "ordinal": 26,
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json setting set appearance.themes.system_theme false",
+      "context": "outside_warp_external_cli",
+      "permission_state": {
+        "source": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_metadata_configuration_mutations": true,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false,
+        "note": "Permissions were enabled by pre-populating the same private local preferences that Settings > Scripting toggles write, before launching the isolated Warp app profile."
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Restore original system-theme setting through setting.set.",
+      "expected_result": "Original system-theme setting is restored.",
+      "actual_result": "Command completed with JSON output.",
+      "exit_code": 0,
+      "status": "pass",
+      "restore_command": true,
+      "stdout_log": "logs/026__outside-paired__restore__restore_system_theme_setting.stdout.json",
+      "stderr_log": "logs/026__outside-paired__restore__restore_system_theme_setting.stderr.txt",
+      "screenshot_paths": {
+        "terminal": "screenshots/026__outside-paired__restore__restore_system_theme_setting__terminal.png",
+        "ui_before": "screenshots/026__outside-paired__restore__restore_system_theme_setting__ui_before.png",
+        "ui_after": "screenshots/026__outside-paired__restore__restore_system_theme_setting__ui_after.png"
+      },
+      "visual_inspection": {
+        "expected_visual_effect": "Original system-theme setting is restored.",
+        "observed_visual_effect": "Captured before/after Warp UI screenshots from X11 root window; average RGB delta=0.00. No substantial full-screen color/scale delta is measurable; persisted/JSON state may still prove non-immediate configuration changes.",
+        "status": "pass",
+        "unexpected_ui_changes": "none observed by automated diff",
+        "computer_vision_method": "X11 root screenshot capture plus average RGB comparison; screenshots are paired with rendered terminal transcript because no graphical terminal/window manager/screenshot utilities are installed."
+      }
+    }
+  ],
+  "blockers": [
+    "Live combined staggered terminal+Warp screenshots were not feasible in the sandbox because no graphical terminal emulator, window manager, or screenshot utilities are installed; terminal transcripts were rendered to PNG and paired with X11 root-window UI captures where possible."
+  ],
+  "app_launch": {
+    "pid": 6994,
+    "log": "logs/app_run.log",
+    "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warp-oss"
+  },
+  "selected_instance": {
+    "instance_id": "inst_4b2e3e3defa947e3a4e4074ef7e7f55d",
+    "pid": 6994,
+    "endpoint": {
+      "host": "127.0.0.1",
+      "port": 46863
+    },
+    "outside_warp_control_enabled": true
+  },
+  "chosen_values": {
+    "theme_set": "Adeberry",
+    "light_theme": "Gruvbox Light",
+    "dark_theme": "Dark",
+    "initial_current_theme": "Dark"
+  },
+  "counts": {
+    "required": {
+      "pass": 19,
+      "fail": 1,
+      "skip": 0,
+      "blocked": 0
+    },
+    "including_restore": {
+      "pass": 25,
+      "fail": 1,
+      "skip": 0,
+      "blocked": 0
+    },
+    "restore": {
+      "pass": 6,
+      "fail": 0,
+      "skip": 0,
+      "blocked": 0
+    }
+  },
+  "visual_inspection_failures_or_blockers": [
+    {
+      "command": "/workspace/warpctrl-validation/metadata-config-mutations/target/debug/warpctrl --output-format json keybinding get copy",
+      "status": "fail",
+      "visual_status": "fail",
+      "observed": "No UI mutation captured for read-only command."
+    }
+  ],
+  "diagnostic_notes": [
+    "keybinding list includes copy-related names such as terminal:copy, but not an exact binding name copy; the required command keybinding get copy returned missing_target."
+  ]
+}

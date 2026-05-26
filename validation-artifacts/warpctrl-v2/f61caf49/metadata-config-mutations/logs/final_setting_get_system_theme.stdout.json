@@ -1,0 +1,7 @@
+{
+  "setting": {
+    "key": "appearance.themes.system_theme",
+    "value": false,
+    "value_type": "bool"
+  }
+}

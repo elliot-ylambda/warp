@@ -1,0 +1,13 @@
+{
+  "path": "/tmp/warpctrl-validation/metadata-config-mutations-run/xdg_config/warp-oss-metadata-config-mutations/user_preferences.json",
+  "prefs": {
+    "HasCompletedOnboarding": "true",
+    "LocalControlAllowOutsideWarp": "true",
+    "LocalControlOutsideWarpMetadataReads": "true",
+    "LocalControlOutsideWarpMetadataConfigurationMutations": "true",
+    "LocalControlOutsideWarpAppStateMutations": "false",
+    "LocalControlOutsideWarpUnderlyingDataReads": "false",
+    "LocalControlOutsideWarpUnderlyingDataMutations": "false",
+    "LocalControlInsideWarpAuthenticatedUserActions": "false"
+  }
+}
