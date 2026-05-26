@@ -939,6 +939,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::RememberFastForwardState,
     FeatureFlag::GeminiNotifications,
     FeatureFlag::LocalDockerSandbox,
+    FeatureFlag::NamedAgents,
     #[cfg(not(windows))]
     FeatureFlag::SshRemoteServer,
     FeatureFlag::DragTabsToWindows,

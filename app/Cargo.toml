@@ -566,7 +566,6 @@ default = [
     "classic_completions",
     "force_classic_completions",
     "team_api_keys",
-    "named_agents",
     "agent_tips",
     "pluggable_notifications",
     "agent_onboarding",
