@@ -29,14 +29,22 @@ fn ambiguous_target_error_code_is_stable() {
 }
 
 #[test]
-fn input_run_is_not_in_the_allowlisted_catalog() {
-    let action = serde_json::from_value::<ActionKind>(serde_json::json!("input.run"));
-    assert!(action.is_err());
-}
-#[test]
 fn malformed_action_name_is_not_deserialized() {
     let action = serde_json::from_value::<ActionKind>(serde_json::json!("tab.create.extra"));
     assert!(action.is_err());
+}
+
+#[test]
+fn excluded_action_names_are_not_deserialized() {
+    for action in [
+        "file.write",
+        "file.delete",
+        "auth.api_key.set",
+        "auth.api_key.status",
+        "auth.api_key.revoke",
+    ] {
+        assert!(serde_json::from_value::<ActionKind>(serde_json::json!(action)).is_err());
+    }
 }
 
 #[test]
@@ -110,7 +118,7 @@ fn default_permissions_preserve_security_categories() {
     );
     assert_eq!(
         ActionKind::InputInsert.metadata().permission_category,
-        PermissionCategory::MutateUnderlyingData
+        PermissionCategory::MutateAppState
     );
     assert_eq!(
         ActionKind::SettingSet.metadata().permission_category,
@@ -122,15 +130,31 @@ fn default_permissions_preserve_security_categories() {
     );
 }
 #[test]
-fn non_first_slice_actions_are_catalog_stubs() {
+fn logged_out_safe_stub_actions_can_advertise_external_context() {
     let metadata = ActionKind::WindowCreate.metadata();
     assert_eq!(
         metadata.implementation_status,
         ActionImplementationStatus::Stub
     );
-    assert!(
-        !metadata
-            .allowed_invocation_contexts
-            .contains(&InvocationContext::OutsideWarp)
-    );
+    assert!(!metadata.authenticated_user.required);
+    assert!(metadata
+        .allowed_invocation_contexts
+        .contains(&InvocationContext::OutsideWarp));
+}
+
+#[test]
+fn authenticated_actions_are_warp_terminal_only_in_the_contract() {
+    for action in [
+        ActionKind::DriveInspect,
+        ActionKind::DriveObjectCreate,
+        ActionKind::DriveWorkflowRun,
+        ActionKind::InputRun,
+    ] {
+        let metadata = action.metadata();
+        assert!(metadata.authenticated_user.required);
+        assert_eq!(
+            metadata.allowed_invocation_contexts,
+            vec![InvocationContext::InsideWarp]
+        );
+    }
 }
