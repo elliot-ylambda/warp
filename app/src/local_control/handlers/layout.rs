@@ -4,7 +4,7 @@ use ::local_control::{ActionKind, ControlError, ErrorCode, InstanceId};
 use serde_json::json;
 use warpui::{ModelContext, TypedActionView};
 
-use crate::local_control::resolver::{target_window_id, validate_tab_create_target};
+use crate::local_control::resolver::{target_window_id_for_target, validate_tab_create_target};
 use crate::local_control::LocalControlBridge;
 use crate::workspace::{Workspace, WorkspaceAction};
 
@@ -14,7 +14,7 @@ pub(crate) fn create_terminal_tab(
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<serde_json::Value, ControlError> {
     validate_tab_create_target(target)?;
-    let window_id = target_window_id(ctx)?;
+    let window_id = target_window_id_for_target(ctx, target, ActionKind::TabCreate)?;
     let workspace = ctx
         .views_of_type::<Workspace>(window_id)
         .and_then(|workspaces| workspaces.into_iter().next())
@@ -44,7 +44,7 @@ pub(crate) fn create_terminal_tab(
         "created": true,
         "instance_id": instance_id.as_ref().map(|id| id.0.as_str()),
         "window": {
-            "selector": "active",
+            "selector": "target",
             "id": window_id.to_string(),
         },
         "tab": {

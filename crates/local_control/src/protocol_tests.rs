@@ -137,9 +137,11 @@ fn logged_out_safe_stub_actions_can_advertise_external_context() {
         ActionImplementationStatus::Stub
     );
     assert!(!metadata.authenticated_user.required);
-    assert!(metadata
-        .allowed_invocation_contexts
-        .contains(&InvocationContext::OutsideWarp));
+    assert!(
+        metadata
+            .allowed_invocation_contexts
+            .contains(&InvocationContext::OutsideWarp)
+    );
 }
 
 #[test]

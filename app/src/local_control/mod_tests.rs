@@ -51,7 +51,7 @@ fn settings_with_outside_warp(
 }
 
 #[test]
-fn tab_create_accepts_default_and_active_targets() {
+fn tab_create_accepts_default_active_and_window_targets() {
     validate_tab_create_target(&TargetSelector::default()).expect("default target is accepted");
 
     validate_tab_create_target(&TargetSelector {
@@ -60,20 +60,35 @@ fn tab_create_accepts_default_and_active_targets() {
         pane: Some(PaneTarget::Active),
     })
     .expect("active target is accepted");
-}
 
-#[test]
-fn tab_create_rejects_concrete_targets() {
-    let err = validate_tab_create_target(&TargetSelector {
+    validate_tab_create_target(&TargetSelector {
         window: Some(WindowTarget::Id {
             id: WindowSelector("window".to_owned()),
         }),
         tab: None,
         pane: None,
     })
-    .expect_err("concrete window target is rejected");
-    assert_eq!(err.code, ErrorCode::StaleTarget);
+    .expect("window id target is accepted");
 
+    validate_tab_create_target(&TargetSelector {
+        window: Some(WindowTarget::Index { index: 0 }),
+        tab: None,
+        pane: None,
+    })
+    .expect("window index target is accepted");
+
+    validate_tab_create_target(&TargetSelector {
+        window: Some(WindowTarget::Title {
+            title: "window".to_owned(),
+        }),
+        tab: None,
+        pane: None,
+    })
+    .expect("window title target is accepted");
+}
+
+#[test]
+fn tab_create_rejects_concrete_targets() {
     let err = validate_tab_create_target(&TargetSelector {
         window: None,
         tab: Some(TabTarget::Id {
@@ -97,14 +112,6 @@ fn tab_create_rejects_concrete_targets() {
 
 #[test]
 fn tab_create_rejects_unsupported_selector_forms() {
-    let err = validate_tab_create_target(&TargetSelector {
-        window: Some(WindowTarget::Index { index: 0 }),
-        tab: None,
-        pane: None,
-    })
-    .expect_err("indexed window target is rejected");
-    assert_eq!(err.code, ErrorCode::InvalidSelector);
-
     let err = validate_tab_create_target(&TargetSelector {
         window: None,
         tab: Some(TabTarget::Index { index: 0 }),
