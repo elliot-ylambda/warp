@@ -35,7 +35,7 @@ fn malformed_action_name_is_not_deserialized() {
 }
 
 #[test]
-fn excluded_action_names_are_not_deserialized() {
+fn non_allowlisted_action_names_are_not_deserialized() {
     for action in [
         "file.write",
         "file.delete",

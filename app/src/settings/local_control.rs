@@ -1,110 +1,82 @@
-//! Private local settings that gate outside-Warp control by risk category.
+//! Private local setting that gates local-control invocation contexts.
 //!
-//! These settings are local-only and kept out of the user-visible settings file,
-//! but this foundation branch still stores them in the existing private
-//! preferences backend. Before outside-Warp control ships, the authoritative
-//! enablement bits should move to protected storage where available, such as
-//! macOS Keychain or the platform equivalent, so external apps cannot enable
-//! local control by editing ordinary preferences.
+//! This setting is local-only, kept out of the user-visible settings file, and
+//! marked `private: true` in the settings definition. It is the authoritative
+//! enablement bit for local control.
+use serde::{Deserialize, Serialize};
 use settings::{macros::define_settings_group, SupportedPlatforms, SyncToCloud};
 
-/// Coarse permission buckets used to gate groups of control actions.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LocalControlPermissionCategory {
-    MetadataReads,
-    UnderlyingDataReads,
-    AppStateMutations,
-    MetadataConfigurationMutations,
-    UnderlyingDataMutations,
+/// User-selected local-control availability.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    PartialEq,
+    schemars::JsonSchema,
+    Serialize,
+    settings_value::SettingsValue,
+)]
+#[schemars(
+    description = "Which local-control invocation contexts are allowed.",
+    rename_all = "snake_case"
+)]
+pub enum LocalControlMode {
+    #[default]
+    Disabled,
+    EnabledWithinWarp,
+    EnabledEverywhere,
+}
+
+impl LocalControlMode {
+    pub const ALL: [Self; 3] = [
+        Self::Disabled,
+        Self::EnabledWithinWarp,
+        Self::EnabledEverywhere,
+    ];
+
+    pub fn allows_inside_warp(self) -> bool {
+        matches!(self, Self::EnabledWithinWarp | Self::EnabledEverywhere)
+    }
+
+    pub fn allows_outside_warp(self) -> bool {
+        matches!(self, Self::EnabledEverywhere)
+    }
+
+    pub fn as_dropdown_label(self) -> &'static str {
+        match self {
+            Self::Disabled => "Disabled",
+            Self::EnabledWithinWarp => "Enabled within Warp",
+            Self::EnabledEverywhere => "Enabled everywhere",
+        }
+    }
 }
 
 define_settings_group!(LocalControlSettings, settings: [
-    allow_outside_warp_control: AllowOutsideWarpControl {
-        type: bool,
-        default: false,
+    local_control_mode: LocalControlModeSetting {
+        type: LocalControlMode,
+        default: LocalControlMode::Disabled,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Never,
         private: true,
-        storage_key: "LocalControlAllowOutsideWarp",
-        description: "Whether Warp control is allowed from external local clients.",
-    },
-    allow_outside_warp_metadata_reads: AllowOutsideWarpMetadataReads {
-        type: bool,
-        default: false,
-        supported_platforms: SupportedPlatforms::DESKTOP,
-        sync_to_cloud: SyncToCloud::Never,
-        private: true,
-        storage_key: "LocalControlOutsideWarpMetadataReads",
-        description: "Whether external local clients may receive metadata-read local control grants.",
-    },
-    allow_outside_warp_underlying_data_reads: AllowOutsideWarpUnderlyingDataReads {
-        type: bool,
-        default: false,
-        supported_platforms: SupportedPlatforms::DESKTOP,
-        sync_to_cloud: SyncToCloud::Never,
-        private: true,
-        storage_key: "LocalControlOutsideWarpUnderlyingDataReads",
-        description: "Whether external local clients may receive underlying-data-read local control grants.",
-    },
-    allow_outside_warp_app_state_mutations: AllowOutsideWarpAppStateMutations {
-        type: bool,
-        default: false,
-        supported_platforms: SupportedPlatforms::DESKTOP,
-        sync_to_cloud: SyncToCloud::Never,
-        private: true,
-        storage_key: "LocalControlOutsideWarpAppStateMutations",
-        description: "Whether external local clients may receive app-state-mutation local control grants.",
-    },
-    allow_outside_warp_metadata_configuration_mutations: AllowOutsideWarpMetadataConfigurationMutations {
-        type: bool,
-        default: false,
-        supported_platforms: SupportedPlatforms::DESKTOP,
-        sync_to_cloud: SyncToCloud::Never,
-        private: true,
-        storage_key: "LocalControlOutsideWarpMetadataConfigurationMutations",
-        description: "Whether external local clients may receive metadata/configuration-mutation local control grants.",
-    },
-    allow_outside_warp_underlying_data_mutations: AllowOutsideWarpUnderlyingDataMutations {
-        type: bool,
-        default: false,
-        supported_platforms: SupportedPlatforms::DESKTOP,
-        sync_to_cloud: SyncToCloud::Never,
-        private: true,
-        storage_key: "LocalControlOutsideWarpUnderlyingDataMutations",
-        description: "Whether external local clients may receive underlying-data-mutation local control grants.",
+        storage_key: "LocalControlMode",
+        description: "Whether Warp local control is disabled, enabled within Warp, or enabled everywhere including outside Warp.",
     },
 ]);
 
 impl LocalControlSettings {
+    pub fn mode(&self) -> LocalControlMode {
+        *self.local_control_mode
+    }
+
+    pub fn inside_warp_control_enabled(&self) -> bool {
+        self.mode().allows_inside_warp()
+    }
+
     pub fn outside_warp_control_enabled(&self) -> bool {
-        *self.allow_outside_warp_control
-    }
-
-    pub fn outside_warp_permission_enabled(
-        &self,
-        permission: LocalControlPermissionCategory,
-    ) -> bool {
-        match permission {
-            LocalControlPermissionCategory::MetadataReads => {
-                *self.allow_outside_warp_metadata_reads
-            }
-            LocalControlPermissionCategory::UnderlyingDataReads => {
-                *self.allow_outside_warp_underlying_data_reads
-            }
-            LocalControlPermissionCategory::AppStateMutations => {
-                *self.allow_outside_warp_app_state_mutations
-            }
-            LocalControlPermissionCategory::MetadataConfigurationMutations => {
-                *self.allow_outside_warp_metadata_configuration_mutations
-            }
-            LocalControlPermissionCategory::UnderlyingDataMutations => {
-                *self.allow_outside_warp_underlying_data_mutations
-            }
-        }
-    }
-
-    pub fn allows_outside_warp(&self, permission: LocalControlPermissionCategory) -> bool {
-        self.outside_warp_control_enabled() && self.outside_warp_permission_enabled(permission)
+        self.mode().allows_outside_warp()
     }
 }
 

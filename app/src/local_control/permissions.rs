@@ -1,7 +1,7 @@
-//! Permission checks that map protocol action metadata onto local settings.
+//! Permission checks that map invocation context onto local settings.
 use crate::features::FeatureFlag;
-use crate::settings::{LocalControlPermissionCategory, LocalControlSettings};
-use ::local_control::{ActionKind, ControlError, ErrorCode, InvocationContext, PermissionCategory};
+use crate::settings::LocalControlSettings;
+use ::local_control::{ActionKind, ControlError, ErrorCode, InvocationContext};
 use warpui::{ModelContext, SingletonEntity};
 
 use crate::local_control::LocalControlBridge;
@@ -21,19 +21,8 @@ pub(super) fn ensure_feature_enabled() -> Result<(), ControlError> {
 }
 
 #[cfg(test)]
-pub(crate) fn outside_warp_action_enabled_for_settings(
-    settings: &LocalControlSettings,
-    action: ActionKind,
-) -> bool {
-    outside_warp_permission_enabled_for_settings(settings, action.metadata().permission_category)
-}
-
-#[cfg(test)]
-fn outside_warp_permission_enabled_for_settings(
-    settings: &LocalControlSettings,
-    permission: PermissionCategory,
-) -> bool {
-    settings.allows_outside_warp(local_permission(permission))
+pub(crate) fn outside_warp_control_enabled_for_settings(settings: &LocalControlSettings) -> bool {
+    settings.outside_warp_control_enabled()
 }
 
 #[cfg(test)]
@@ -42,22 +31,6 @@ pub(crate) fn capabilities() -> Vec<ActionKind> {
         .into_iter()
         .map(|metadata| metadata.kind)
         .collect()
-}
-
-fn local_permission(permission: PermissionCategory) -> LocalControlPermissionCategory {
-    match permission {
-        PermissionCategory::ReadMetadata => LocalControlPermissionCategory::MetadataReads,
-        PermissionCategory::ReadUnderlyingData => {
-            LocalControlPermissionCategory::UnderlyingDataReads
-        }
-        PermissionCategory::MutateAppState => LocalControlPermissionCategory::AppStateMutations,
-        PermissionCategory::MutateMetadataConfiguration => {
-            LocalControlPermissionCategory::MetadataConfigurationMutations
-        }
-        PermissionCategory::MutateUnderlyingData => {
-            LocalControlPermissionCategory::UnderlyingDataMutations
-        }
-    }
 }
 
 pub(super) fn ensure_action_allowed(
@@ -74,27 +47,36 @@ pub(crate) fn ensure_settings_allow_action(
     context: InvocationContext,
     action: ActionKind,
 ) -> Result<(), ControlError> {
-    if context == InvocationContext::InsideWarp {
-        return Err(ControlError::new(
-            ErrorCode::ExecutionContextNotAllowed,
-            "inside-Warp local-control grants are not implemented",
-        ));
+    match context {
+        InvocationContext::InsideWarp => {
+            if !settings.inside_warp_control_enabled() {
+                return Err(ControlError::new(
+                    ErrorCode::LocalControlDisabled,
+                    format!(
+                        "{} is disabled for inside-Warp local control",
+                        action.as_str()
+                    ),
+                ));
+            }
+            Err(ControlError::new(
+                ErrorCode::ExecutionContextNotAllowed,
+                format!(
+                    "{} cannot run from inside-Warp local control until verified terminal proofs are implemented",
+                    action.as_str()
+                ),
+            ))
+        }
+        InvocationContext::OutsideWarp => {
+            if !settings.outside_warp_control_enabled() {
+                return Err(ControlError::new(
+                    ErrorCode::LocalControlDisabled,
+                    format!(
+                        "{} is disabled for outside-Warp local control",
+                        action.as_str()
+                    ),
+                ));
+            }
+            Ok(())
+        }
     }
-    if !settings.outside_warp_control_enabled() {
-        return Err(ControlError::new(
-            ErrorCode::LocalControlDisabled,
-            "local control is disabled for this invocation context",
-        ));
-    }
-    let permission = local_permission(action.metadata().permission_category);
-    if !settings.outside_warp_permission_enabled(permission) {
-        return Err(ControlError::new(
-            ErrorCode::InsufficientPermissions,
-            format!(
-                "{} requires a local-control permission that is disabled",
-                action.as_str()
-            ),
-        ));
-    }
-    Ok(())
 }

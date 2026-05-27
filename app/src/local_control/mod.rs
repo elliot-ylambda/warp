@@ -7,23 +7,21 @@
 //! short-lived scoped credential from `/v1/control/credentials`; the localhost
 //! server running inside Warp checks the feature flag, requested invocation
 //! context, action metadata, execution-context proof, and Settings > Scripting
-//! permissions before minting a bearer token. This foundation branch currently
-//! supports only outside-Warp credential requests; verified inside-Warp
-//! terminal credentials remain future work until the app-issued proof broker is
+//! permissions before minting a bearer token. Outside-Warp clients use the
+//! localhost credential broker directly; verified inside-Warp terminal
+//! credentials remain future work until the app-issued proof broker is
 //! implemented. The client then presents that bearer token to `/v1/control`,
 //! where the server looks up the in-memory grant, verifies it still matches the
 //! requested action, and only then hands the request to the main-thread
 //! `LocalControlBridge`.
 //!
-//! The Settings > Scripting gates used here are provisional foundation-branch
-//! authority. They are private and local-only, but private preferences are not
-//! equivalent to tamper-resistant secure storage; before outside-Warp control
-//! or broader grants ship, the authoritative enablement bits should move to
-//! protected storage where the platform supports it.
+//! The Settings > Scripting gates used here are private, local-only settings.
+//! Broader grants should keep using private settings unless a future action
+//! class requires stronger platform-specific storage guarantees.
 //!
-//! This foundation branch intentionally keeps raw bearer tokens out of
-//! discovery records: discovery only exposes endpoint metadata and credential
-//! broker references when outside-Warp control is enabled.
+//! Discovery records never include raw bearer tokens: discovery only exposes
+//! endpoint metadata and credential broker references when outside-Warp control
+//! is enabled.
 mod bridge;
 mod handlers;
 mod permissions;
@@ -64,7 +62,7 @@ struct ControlServerState {
 pub struct LocalControlServer {
     _runtime: Option<tokio::runtime::Runtime>,
     control_endpoint: Option<ControlEndpoint>,
-    _registered_instance: Option<RegisteredInstance>,
+    registered_instance: Option<RegisteredInstance>,
 }
 
 impl Entity for LocalControlServer {
@@ -79,7 +77,7 @@ impl LocalControlServer {
             return Self {
                 _runtime: None,
                 control_endpoint: None,
-                _registered_instance: None,
+                registered_instance: None,
             };
         }
         match Self::start(ctx) {
@@ -101,7 +99,7 @@ impl LocalControlServer {
                 Self {
                     _runtime: None,
                     control_endpoint: None,
-                    _registered_instance: None,
+                    registered_instance: None,
                 }
             }
         }
@@ -164,7 +162,7 @@ impl LocalControlServer {
         Ok(Self {
             _runtime: Some(runtime),
             control_endpoint: Some(control_endpoint),
-            _registered_instance: Some(registered_instance),
+            registered_instance: Some(registered_instance),
         })
     }
 
@@ -175,7 +173,7 @@ impl LocalControlServer {
         let Some(control_endpoint) = self.control_endpoint.clone() else {
             return Ok(());
         };
-        let Some(registered_instance) = &mut self._registered_instance else {
+        let Some(registered_instance) = &mut self.registered_instance else {
             return Ok(());
         };
         let mut record = discovery_record_for_settings(ctx, control_endpoint);
@@ -414,7 +412,7 @@ async fn handle_control_request(
 
 #[cfg(test)]
 pub(crate) use permissions::{
-    capabilities, ensure_settings_allow_action, outside_warp_action_enabled_for_settings,
+    capabilities, ensure_settings_allow_action, outside_warp_control_enabled_for_settings,
 };
 #[cfg(test)]
 pub(crate) use resolver::{

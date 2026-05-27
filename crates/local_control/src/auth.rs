@@ -8,7 +8,6 @@ use uuid::Uuid;
 use crate::discovery::InstanceId;
 use crate::protocol::{
     ActionKind, ControlError, ErrorCode, ExecutionContextProof, InvocationContext,
-    PermissionCategory, RiskTier, StateDataCategory,
 };
 
 /// Bearer token used to authorize a single scoped local-control credential.
@@ -133,9 +132,6 @@ pub struct CredentialGrant {
     pub credential_id: String,
     pub instance_id: InstanceId,
     pub action: ActionKind,
-    pub risk_tier: RiskTier,
-    pub state_data_category: StateDataCategory,
-    pub permission_category: PermissionCategory,
     pub invocation_context: InvocationContext,
     pub authenticated_user: AuthenticatedUserGrant,
     pub issued_at: DateTime<Utc>,
@@ -162,9 +158,6 @@ impl CredentialGrant {
             credential_id: format!("cred_{}", Uuid::new_v4().simple()),
             instance_id,
             action,
-            risk_tier: metadata.risk_tier,
-            state_data_category: metadata.state_data_category,
-            permission_category: metadata.permission_category,
             invocation_context,
             authenticated_user: AuthenticatedUserGrant {
                 required: metadata.authenticated_user.required,
@@ -193,18 +186,6 @@ impl CredentialGrant {
             ));
         }
         let metadata = action.metadata();
-        if self.risk_tier != metadata.risk_tier
-            || self.state_data_category != metadata.state_data_category
-            || self.permission_category != metadata.permission_category
-        {
-            return Err(ControlError::new(
-                ErrorCode::InsufficientPermissions,
-                format!(
-                    "credential grant metadata does not satisfy {}",
-                    action.as_str()
-                ),
-            ));
-        }
         if metadata.requires_authenticated_user && self.authenticated_user.subject.is_none() {
             return Err(ControlError::new(
                 ErrorCode::AuthenticatedUserRequired,

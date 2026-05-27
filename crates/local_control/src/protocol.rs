@@ -4,9 +4,8 @@ use uuid::Uuid;
 
 pub use crate::catalog::{
     ActionImplementationStatus, ActionKind, ActionMetadata, ActionParameterSpec, ActionResultSpec,
-    AuthenticatedUserRequirement, EXCLUDED_LOCAL_FILE_MUTATION_ACTION_NAMES,
-    EXCLUDED_STANDALONE_SECRET_AUTH_ACTION_NAMES, ExecutionContextProof, InvocationContext,
-    PROTOCOL_VERSION, PermissionCategory, RiskTier, StateDataCategory, TargetScope,
+    AuthenticatedUserRequirement, ExecutionContextProof, InvocationContext, PROTOCOL_VERSION,
+    PermissionCategory, RiskTier, StateDataCategory, TargetScope,
 };
 pub use crate::selectors::{
     PaneSelector, PaneTarget, TabSelector, TabTarget, TargetSelector, WindowSelector, WindowTarget,
@@ -120,9 +119,6 @@ pub enum ActionParams {
     PageQuery {
         page: Option<String>,
         query: Option<String>,
-    },
-    Path {
-        path: String,
     },
     Query {
         query: Option<String>,

@@ -9,45 +9,15 @@ use warp_core::features::FeatureFlag;
 
 use super::{
     capabilities, ensure_feature_enabled, ensure_settings_allow_action,
-    outside_warp_action_enabled_for_settings, require_active_window_id, validate_action_params,
+    outside_warp_control_enabled_for_settings, require_active_window_id, validate_action_params,
     validate_tab_create_target,
 };
-use crate::settings::{
-    AllowOutsideWarpAppStateMutations, AllowOutsideWarpControl,
-    AllowOutsideWarpMetadataConfigurationMutations, AllowOutsideWarpMetadataReads,
-    AllowOutsideWarpUnderlyingDataMutations, AllowOutsideWarpUnderlyingDataReads,
-    LocalControlSettings,
-};
+use crate::settings::{LocalControlMode, LocalControlModeSetting, LocalControlSettings};
 
-fn settings_with_values(
-    outside_enabled: bool,
-    outside_metadata_reads: bool,
-    outside_app_state_mutations: bool,
-) -> LocalControlSettings {
+fn settings_with_mode(mode: LocalControlMode) -> LocalControlSettings {
     LocalControlSettings {
-        allow_outside_warp_control: AllowOutsideWarpControl::new(Some(outside_enabled)),
-        allow_outside_warp_metadata_reads: AllowOutsideWarpMetadataReads::new(Some(
-            outside_metadata_reads,
-        )),
-        allow_outside_warp_underlying_data_reads: AllowOutsideWarpUnderlyingDataReads::new(Some(
-            false,
-        )),
-        allow_outside_warp_app_state_mutations: AllowOutsideWarpAppStateMutations::new(Some(
-            outside_app_state_mutations,
-        )),
-        allow_outside_warp_metadata_configuration_mutations:
-            AllowOutsideWarpMetadataConfigurationMutations::new(Some(false)),
-        allow_outside_warp_underlying_data_mutations: AllowOutsideWarpUnderlyingDataMutations::new(
-            Some(false),
-        ),
+        local_control_mode: LocalControlModeSetting::new(Some(mode)),
     }
-}
-
-fn settings_with_outside_warp(
-    outside_control: bool,
-    outside_app_state_mutations: bool,
-) -> LocalControlSettings {
-    settings_with_values(outside_control, false, outside_app_state_mutations)
 }
 
 #[test]
@@ -135,18 +105,15 @@ fn capabilities_advertises_only_first_slice_core_actions() {
 }
 
 #[test]
-fn outside_warp_discovery_requires_context_and_action_permission() {
-    assert!(!outside_warp_action_enabled_for_settings(
-        &settings_with_outside_warp(false, true),
-        ActionKind::TabCreate
+fn outside_warp_discovery_requires_everywhere_mode() {
+    assert!(!outside_warp_control_enabled_for_settings(
+        &settings_with_mode(LocalControlMode::Disabled)
     ));
-    assert!(!outside_warp_action_enabled_for_settings(
-        &settings_with_outside_warp(true, false),
-        ActionKind::TabCreate
+    assert!(!outside_warp_control_enabled_for_settings(
+        &settings_with_mode(LocalControlMode::EnabledWithinWarp)
     ));
-    assert!(outside_warp_action_enabled_for_settings(
-        &settings_with_outside_warp(true, true),
-        ActionKind::TabCreate
+    assert!(outside_warp_control_enabled_for_settings(
+        &settings_with_mode(LocalControlMode::EnabledEverywhere)
     ));
 }
 
@@ -170,21 +137,21 @@ fn feature_flag_disabled_denies_local_control() {
 }
 
 #[test]
-fn disabled_outside_warp_denies_before_granular_permission() {
-    let settings = settings_with_values(false, true, true);
+fn outside_warp_requires_everywhere_mode() {
+    let settings = settings_with_mode(LocalControlMode::EnabledWithinWarp);
 
     let err = ensure_settings_allow_action(
         &settings,
         InvocationContext::OutsideWarp,
         ActionKind::TabCreate,
     )
-    .expect_err("outside-Warp parent context is disabled");
+    .expect_err("outside-Warp local control is disabled");
     assert_eq!(err.code, ErrorCode::LocalControlDisabled);
 }
 
 #[test]
 fn inside_warp_context_is_not_implemented() {
-    let settings = settings_with_values(true, true, true);
+    let settings = settings_with_mode(LocalControlMode::EnabledWithinWarp);
 
     let err = ensure_settings_allow_action(
         &settings,
@@ -196,16 +163,26 @@ fn inside_warp_context_is_not_implemented() {
 }
 
 #[test]
-fn disabled_granular_permission_denies_with_insufficient_permissions() {
-    let settings = settings_with_values(true, true, false);
+fn disabled_mode_denies_inside_warp_context() {
+    let settings = settings_with_mode(LocalControlMode::Disabled);
 
     let err = ensure_settings_allow_action(
         &settings,
+        InvocationContext::InsideWarp,
+        ActionKind::TabCreate,
+    )
+    .expect_err("inside-Warp local control is disabled");
+    assert_eq!(err.code, ErrorCode::LocalControlDisabled);
+}
+
+#[test]
+fn enabled_everywhere_allows_outside_warp_context() {
+    ensure_settings_allow_action(
+        &settings_with_mode(LocalControlMode::EnabledEverywhere),
         InvocationContext::OutsideWarp,
         ActionKind::TabCreate,
     )
-    .expect_err("read-write permission is disabled");
-    assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+    .expect("outside-Warp local control is enabled");
 }
 
 #[test]

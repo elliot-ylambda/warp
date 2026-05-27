@@ -76,7 +76,10 @@ impl LocalControlBridge {
                 {
                     return ResponseEnvelope::error(request.request_id, error);
                 }
-                ResponseEnvelope::ok(request.request_id, metadata::instance(&self.instance_id))
+                match metadata::instance(&self.instance_id) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
             }
             ActionKind::AppPing => {
                 if let Err(error) =
@@ -84,7 +87,10 @@ impl LocalControlBridge {
                 {
                     return ResponseEnvelope::error(request.request_id, error);
                 }
-                ResponseEnvelope::ok(request.request_id, metadata::ping(&self.instance_id))
+                match metadata::ping(&self.instance_id) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
             }
             ActionKind::AppVersion => {
                 if let Err(error) =
@@ -92,7 +98,10 @@ impl LocalControlBridge {
                 {
                     return ResponseEnvelope::error(request.request_id, error);
                 }
-                ResponseEnvelope::ok(request.request_id, metadata::version(&self.instance_id))
+                match metadata::version(&self.instance_id) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
             }
             ActionKind::TabCreate => {
                 if let Err(error) =

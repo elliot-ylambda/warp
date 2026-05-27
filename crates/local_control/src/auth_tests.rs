@@ -2,7 +2,6 @@ use chrono::Duration;
 
 use super::*;
 use crate::discovery::InstanceId;
-use crate::protocol::{PermissionCategory, StateDataCategory};
 
 #[test]
 fn rejects_missing_authorization_header() {
@@ -56,39 +55,30 @@ fn scoped_credential_allows_only_granted_action() {
 }
 
 #[test]
-fn scoped_credential_carries_permission_and_authenticated_user_metadata() {
+fn scoped_credential_carries_authenticated_user_metadata() {
     let grant = CredentialGrant::new(
         InstanceId("inst_test".to_owned()),
         ActionKind::TabCreate,
         InvocationContext::OutsideWarp,
         Duration::minutes(5),
     );
-    assert_eq!(grant.risk_tier, RiskTier::MutatingNonDestructive);
-    assert_eq!(
-        grant.state_data_category,
-        StateDataCategory::AppStateMutation
-    );
-    assert_eq!(
-        grant.permission_category,
-        PermissionCategory::MutateAppState
-    );
     assert!(!grant.authenticated_user.required);
     assert!(grant.authenticated_user.subject.is_none());
 }
 
 #[test]
-fn mismatched_permission_metadata_is_rejected() {
-    let mut grant = CredentialGrant::new(
+fn authenticated_user_actions_require_subject() {
+    let grant = CredentialGrant::new(
         InstanceId("inst_test".to_owned()),
-        ActionKind::TabCreate,
-        InvocationContext::OutsideWarp,
+        ActionKind::DriveInspect,
+        InvocationContext::InsideWarp,
         Duration::minutes(5),
     );
-    grant.permission_category = PermissionCategory::ReadMetadata;
+    assert!(grant.authenticated_user.required);
     let err = grant
-        .verify_for_action(ActionKind::TabCreate)
-        .expect_err("metadata mismatch is rejected");
-    assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+        .verify_for_action(ActionKind::DriveInspect)
+        .expect_err("authenticated-user actions require a subject");
+    assert_eq!(err.code, ErrorCode::AuthenticatedUserRequired);
 }
 
 #[test]

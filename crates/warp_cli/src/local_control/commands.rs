@@ -4,7 +4,6 @@ use local_control::protocol::{
 };
 use local_control::selection::select_instance;
 use serde::Serialize;
-use serde_json::json;
 
 use crate::agent::OutputFormat;
 use crate::local_control::output::{write_json, write_json_line};
@@ -83,10 +82,8 @@ pub(super) fn run_app_command(
     output_format: OutputFormat,
 ) -> Result<(), ControlError> {
     match command {
-        AppCommand::Ping(args) => run_action(args, ActionKind::AppPing, json!({}), output_format),
-        AppCommand::Version(args) => {
-            run_action(args, ActionKind::AppVersion, json!({}), output_format)
-        }
+        AppCommand::Ping(args) => run_action(args, ActionKind::AppPing, output_format),
+        AppCommand::Version(args) => run_action(args, ActionKind::AppVersion, output_format),
     }
 }
 pub(super) fn run_tab_command(
@@ -94,25 +91,19 @@ pub(super) fn run_tab_command(
     output_format: OutputFormat,
 ) -> Result<(), ControlError> {
     match command {
-        TabCommand::Create(args) => {
-            run_action(args, ActionKind::TabCreate, json!({}), output_format)
-        }
+        TabCommand::Create(args) => run_action(args, ActionKind::TabCreate, output_format),
     }
 }
 
 fn run_action(
     args: TargetArgs,
     action: ActionKind,
-    params: serde_json::Value,
     output_format: OutputFormat,
 ) -> Result<(), ControlError> {
     let records = local_control::discovery::list_instances();
     let selector = instance_selector(args);
     let instance = select_instance(&records, &selector)?;
-    let request = RequestEnvelope::new(Action {
-        kind: action,
-        params,
-    });
+    let request = RequestEnvelope::new(Action::new(action));
     let response = local_control::client::send_request(&instance, &request)?;
     let local_control::protocol::ControlResponse::Ok { data } = response.response else {
         return Err(ControlError::new(

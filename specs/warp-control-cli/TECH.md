@@ -1,6 +1,6 @@
 # Context
 `PRODUCT.md` defines a standalone local Warp control CLI binary, provisionally named `warpctrl`, with an allowlisted action catalog, deterministic addressing across multiple running Warp app processes, and an incremental implementation plan.
-`SECURITY.md` is the normative security architecture for this feature. Implementation work must follow it for the top-level Settings > Scripting surface, protected enablement storage, granular permissions, discovery metadata, credential storage, scoped safety grants, verified execution context, authenticated-user requirements, localhost/browser protections, permission-category enforcement, deterministic target resolution, and local app-side validation. The long-term architecture includes separate verified inside-Warp and outside-Warp invocation contexts, but the current foundation implementation supports outside-Warp requests only and must reject `InvocationContext::InsideWarp` until the verified Warp-terminal proof broker lands. If this technical plan and `SECURITY.md` disagree, update the plan before implementing rather than treating the security architecture as optional follow-up work.
+`SECURITY.md` is the normative security architecture for this feature. Implementation work must follow it for the top-level Settings > Scripting surface, protected mode storage, discovery metadata, credential storage, scoped safety grants, verified execution context, authenticated-user requirements, localhost/browser protections, permission-category enforcement, deterministic target resolution, and local app-side validation. The long-term architecture includes separate verified inside-Warp and outside-Warp invocation contexts, but the current foundation implementation supports outside-Warp requests only in the broadest mode and must reject `InvocationContext::InsideWarp` until the verified Warp-terminal proof broker lands. If this technical plan and `SECURITY.md` disagree, update the plan before implementing rather than treating the security architecture as optional follow-up work.
 The existing app already has three relevant building blocks:
 - `crates/http_server/src/lib.rs (7-61)` runs a native-only loopback Axum server on fixed port `9277`.
 - `app/src/lib.rs (1993-2001)` registers that HTTP server in the native app and currently merges only installation-detection and profiling routers.
@@ -26,22 +26,22 @@ The most important constraint surfaced by this code is that the current fixed-po
 ### 0. Security architecture dependency
 Before implementing any local-control listener, CLI command, credential path, or action handler, the implementation must be checked against `SECURITY.md`.
 Required security gates:
-- Long term, local control scripting has separate inside-Warp and outside-Warp enablement states. Inside-Warp control for verified Warp-managed terminal sessions can default on only after the app-issued proof broker exists; outside-Warp control for external terminals, scripts, IDEs, launch agents, and other same-user processes defaults off.
-- In the current foundation slice, only outside-Warp enablement and permissions are implemented. Inside-Warp credential requests must be rejected and inside-Warp settings must not be exposed in the UI.
-- In the long-term model, both controls live under a new top-level Settings pane page named **Scripting**.
-- The authoritative enablement states are local-only, not Settings Sync'd, and stored in protected local storage rather than ordinary user-editable settings.
-- The current foundation branch must mark all implemented outside-Warp local-control settings as `private: true` and `sync_to_cloud: SyncToCloud::Never`. They must not appear in the user-visible `settings.toml` file, generated settings schema, Settings Sync, Warp Drive, server-backed preferences, or any future `warpctrl settings` surface.
-- `warpctrl`, direct protocol requests, shell scripts, config files, registry/plist edits, defaults writes, and server-backed preferences must not be able to enable either setting.
+- Local control scripting has a single mode setting: disabled, enabled within Warp by default, and enabled everywhere including outside Warp. Inside-Warp control for verified Warp-managed terminal sessions can work only after the app-issued proof broker exists; outside-Warp control for external terminals, scripts, IDEs, launch agents, and other same-user processes requires the broadest mode.
+- In the current foundation slice, the mode setting is implemented, outside-Warp credential requests are allowed only in the broadest mode, and inside-Warp credential requests must be rejected until proof verification exists.
+- The control lives under a new top-level Settings pane page named **Scripting**.
+- The authoritative mode is local-only, not Settings Sync'd, and stored in protected local storage rather than ordinary user-editable settings.
+- The current foundation branch must mark the implemented local-control mode as `private: true` and `sync_to_cloud: SyncToCloud::Never`. It must not appear in the user-visible `settings.toml` file, generated settings schema, Settings Sync, Warp Drive, server-backed preferences, or any future `warpctrl settings` surface.
+- `warpctrl`, direct protocol requests, shell scripts, config files, registry/plist edits, defaults writes, and server-backed preferences must not be able to enable or widen the mode.
 - Discovery records do not publish actionable endpoints or credential references for disabled outside-Warp control.
 - Credential issuance is unavailable when the request's invocation context is disabled.
 - Raw credential material is kept out of plaintext discovery records and stored in platform secure storage where available.
 - The broker distinguishes verified Warp-terminal invocations from external invocations using an app-issued execution-context proof, not a caller-declared label. Until that broker exists, `InsideWarp` is a reserved protocol concept that must not receive credentials.
 - External invocations default to a smaller logged-out-safe action set that does not touch user-authenticated data.
-- Verified Warp-terminal invocations may receive authenticated-user grants only when the selected app has a true logged-in Warp user and local-control settings allow authenticated-user actions from Warp terminals.
+- Verified Warp-terminal invocations may receive authenticated-user grants only when the selected app has a true logged-in Warp user and local-control mode plus action policy allow authenticated-user actions from Warp terminals.
 - The app rejects disabled, unauthenticated, expired, revoked, insufficient-scope, unsupported, malformed, ambiguous, missing-target, and stale-target requests with structured errors.
 - Every action has a documented state/data category and the app bridge enforces the required permission category locally before selector resolution or handler dispatch.
 - Every action has a documented `requires_authenticated_user` value and allowed execution contexts. New actions default to requiring an authenticated user unless explicitly reviewed as logged-out-safe.
-- Granular local-control settings under Settings > Scripting gate the maximum grants for metadata reads, underlying data reads, app-state mutations, metadata/configuration mutations, underlying data mutations, authenticated-user actions from Warp terminals, and authenticated-user actions from external clients.
+- The Settings > Scripting mode gates invocation contexts; action metadata, credential grants, Agent/Profile policy, and authenticated-scripting identity gate metadata reads, underlying data reads, app-state mutations, metadata/configuration mutations, underlying data mutations, and authenticated-user actions.
 - Permission categories are treated as user-intent and accident-prevention guardrails, not as strong same-user malicious-app isolation.
 - Remote control remains out of scope for the local same-machine credential model.
 The first implementation slice should include the protected enablement gate, credential issuance checks, and app-side permission-category enforcement even if the only mutating action initially implemented is `tab.create`. Shipping `tab.create` without the enablement and validation architecture would create the wrong foundation for the full catalog.
@@ -113,7 +113,7 @@ Recommended design:
   - control-listener endpoint
   - protocol version
   - start timestamp
-  - credential metadata or secure-storage references only when the relevant inside-Warp or outside-Warp context is enabled
+  - credential metadata or secure-storage references only when the selected mode allows the relevant inside-Warp or outside-Warp context
 - The CLI loads discovery records, removes or ignores stale records after health checks, and chooses an instance using the product selector rules.
 - `warpctrl instance list` is a CLI-first projection of this discovery registry plus health responses.
 When outside-Warp control is disabled, discovery must follow `SECURITY.md`: either publish no actionable local-control record for external clients or publish only a minimal disabled-status record with no endpoint authority or credential reference.
@@ -122,12 +122,12 @@ This design preserves the current `9277` behavior while avoiding cross-process p
 Mutating localhost routes should not copy the permissive CORS posture of `/install_detection`.
 Recommended local trust model:
 - No browser-readable CORS allowance on control endpoints.
-- The relevant implemented Scripting setting must allow the request context before credentials are minted or sensitive control requests are accepted. In the current foundation branch that means outside-Warp only; future inside-Warp support must add its own verified setting gate.
-- The authoritative enablement bit must live in protected local storage and must not be writable by `warpctrl` or ordinary same-user preference/config edits.
+- The relevant Scripting mode must allow the request context before credentials are minted or sensitive control requests are accepted. In the current foundation branch that means outside-Warp only when the broadest mode is selected; future inside-Warp support must also verify the terminal proof.
+- The authoritative mode must live in protected local storage and must not be writable by `warpctrl` or ordinary same-user preference/config edits.
 - Per-instance raw credential material must be kept out of plaintext discovery records and stored in platform secure storage where practical.
 - The CLI may load or request scoped credentials through an app-owned broker/helper, but it must not mint authority itself.
 - The broker verifies whether the invocation originated from a Warp-managed terminal session before issuing in-Warp-only grants.
-- The broker issues authenticated-user grants only when the selected app has a true logged-in Warp user and the relevant local-control permission is enabled.
+- The broker issues authenticated-user grants only when the selected app has a true logged-in Warp user and the selected mode plus action policy allow the grant.
 - The app rejects disabled-state, missing, malformed, invalid, expired, or revoked credentials before selector resolution or mutation.
 - The app maps every action to a state/data category and rejects insufficient grants before selector resolution or mutation.
 - The app maps every action to a `requires_authenticated_user` value and allowed execution contexts, rejecting mismatches before selector resolution or mutation.
@@ -142,22 +142,22 @@ Minimum implementable design:
 - The shell receives only proof material needed by `warpctrl`, such as an opaque handle plus a short-lived token or challenge-response input. Plain environment variables may carry handles or hints, but a caller-set variable must not be sufficient authority.
 - `warpctrl` invoked from that terminal sends `InvocationContext::InsideWarp` and `ExecutionContextProof::VerifiedWarpTerminal` to `/v1/control/credentials` when it has proof material. Without proof material it must use `OutsideWarp`.
 - The broker verifies the proof against the app-owned registry, including app instance, session liveness, expiry, revocation, and nonce or challenge binding before minting any inside-Warp scoped credential.
-- The broker then checks Settings > Scripting and permission-category policy for the requested action. A valid proof raises the maximum eligible grant set; it does not bypass user settings, action metadata, authenticated-user requirements, target scopes, or bridge enforcement.
+- The broker then checks Settings > Scripting mode and permission-category policy for the requested action. A valid proof raises the maximum eligible grant set; it does not bypass user settings, action metadata, authenticated-user requirements, target scopes, or bridge enforcement.
 - The minted credential records `invocation_context: InsideWarp`, the granted permission category, expiry, instance, and any authenticated-user subject. The app bridge revalidates the grant and current app policy on every control request.
 Hardened follow-ups can strengthen this minimum design by storing secret material in platform secure storage, exposing only opaque handles through the shell, using Unix-domain-socket or named-pipe peer-credential checks, binding proofs to broker challenges, and invalidating proofs on shell/session teardown, app logout, user switch, or Settings > Scripting changes. These hardening layers improve direct-token theft resistance, but they do not create a perfect security boundary against malicious same-user software with process, filesystem, Accessibility, or screen-observation access.
 ### 5. Authenticated scripting identity and API-key grants
 The full control catalog includes Warp Drive data mutation and execution-underlying actions. Those actions require an authenticated scripting layer in addition to local-control credentials. Local-control credentials prove authority to call the local app; authenticated scripting credentials prove the Warp user or automation identity allowed to request user-backed or high-risk actions.
 #### Inside-Warp authenticated scripting
-For `warpctrl` launched inside a Warp-managed terminal, use the verified terminal proof broker from the previous section. When the proof is valid and the selected app is logged into Warp, the broker may mint an authenticated-user grant bound to the app's current user subject. The grant is available only if Settings > Scripting enables authenticated-user actions for verified Warp terminals and the requested action's permission category is enabled.
+For `warpctrl` launched inside a Warp-managed terminal, use the verified terminal proof broker from the previous section. When the proof is valid and the selected app is logged into Warp, the broker may mint an authenticated-user grant bound to the app's current user subject. The grant is available only if the selected Settings > Scripting mode and action policy allow authenticated-user actions for verified Warp terminals.
 The CLI must not receive raw Firebase, OAuth, server, or session tokens. The app bridge executes authenticated actions through the selected app's existing auth state and rejects the grant if the app logs out, switches users, or the grant subject no longer matches the app user.
 #### External API-key authenticated scripting
 For `warpctrl` launched outside Warp, by cron, or by another pure scripting environment, introduce a separate API-key path. The user creates or supplies a Warp-issued scripting API key with explicit scopes such as local-control authenticated reads, Drive mutation, or execution-underlying actions. The CLI may reference the key from a secret manager or environment variable such as `WARPCTRL_API_KEY`, or store it in platform secure storage through `warpctrl auth api-key set --key-stdin`; it must never print or write the raw key to discovery records, logs, JSON output, shell completions, or repo config.
 The local broker exchanges or validates the API key with Warp services, obtains a short-lived signed identity assertion, and mints a local authenticated-user grant only when all of the following hold:
-- outside-Warp scripting is enabled;
+- the broadest local-control mode is selected;
 - external authenticated-user grants are enabled separately from logged-out outside-Warp control;
 - the API key is valid, unexpired, unrevoked, and scoped for the requested permission category and action family;
 - the selected app is logged into the same Warp user subject, or the action is explicitly designed to use API-key-backed identity without exporting app cloud tokens;
-- the requested local-control permission category is enabled;
+- the requested local-control permission category is granted by action policy and credential issuance;
 - any resource or target restrictions in the key and grant are satisfied.
 The grant should record the API-key subject, scopes, credential ID, expiry, invocation context, permission category, and optional target/resource restrictions. The app bridge revalidates the grant before selector resolution and handler dispatch.
 #### Auth command surface and storage
@@ -199,7 +199,7 @@ HTTP handler (Tokio thread)
 
 LocalControlBridge::handle_request (main thread)
   │
-  ├─ verify protected context-specific enablement state is still enabled
+  ├─ verify protected local-control mode still allows the context
   ├─ map action to required permission category
   ├─ map action to authenticated-user and execution-context requirements
   ├─ verify presented credential grants that category, target family, execution context, and authenticated-user access
@@ -226,7 +226,7 @@ LocalControlBridge::handle_request (main thread)
 - **Deterministic targeting.** The bridge must not silently fall back from the active window to an arbitrary ordered window for mutating actions. If the caller relies on the default active selector and no active window exists, return a structured missing-target or invalid-selector error. If future command forms allow explicit window IDs, resolve the explicit ID exactly or return `stale_target`.
 #### Adding new action handlers
 To add a new action to the bridge:
-1. Add a variant to `ActionKind` in `crates/local_control/src/protocol.rs`.
+1. Add an entry to the macro-backed `ActionKind` catalog in `crates/local_control/src/catalog.rs`.
 2. Document its `SECURITY.md` state/data category, required permission grant, `requires_authenticated_user` value, and allowed execution contexts.
 3. Add a match arm in `LocalControlBridge::handle_request` in `app/src/local_control/mod.rs`.
 4. Before selector resolution or dispatch, verify local control is enabled and the presented credential grants the action category, target family, execution context, and authenticated-user access if required.
@@ -277,8 +277,8 @@ Recommended modules/families:
   - theme list/set, system-theme controls, font/zoom actions, allowlisted settings reads/writes/toggles.
 - Panels/surfaces:
   - settings/page/search, palettes, left/right panels, Drive, resource center, code review, vertical tabs, AI assistant.
-- Files/projects:
-  - app-state-only path opening, project opening, and metadata reads for files already open in Warp. File content reads and filesystem-content mutations are intentionally excluded from the public `warpctrl` catalog.
+- Files:
+  - app-state-only path opening and metadata reads for files already open in Warp. File content reads and filesystem-content mutations are intentionally excluded from the public `warpctrl` catalog.
 - Warp Drive:
   - object listing/inspection/opening, object creation/update/delete/insert, opening the share dialog, the v0 personal-to-team share mutation, and typed workflow execution where supported.
 Do not use a generic “dispatch action by string” endpoint. Every handler should be reachable only through an explicit `ControlAction` variant.
@@ -301,17 +301,16 @@ The `warpui::Action` trait should not be extended for this purpose because it cu
 The first `warpctrl` implementation slice should land the minimum cross-cutting architecture plus a single representative tab mutation:
 - Shared protocol types and error envelopes.
 - `FeatureFlag::WarpControlCli` and Cargo feature `warp_control_cli`, with app-side runtime gating for settings, discovery, bridge registration, and local-control endpoints.
-- New top-level Settings > Scripting page rendered only while `FeatureFlag::WarpControlCli` is enabled. The current foundation exposes outside-Warp local-control settings only; verified inside-Warp controls are deferred until the proof broker exists.
-- Protected local-only enablement storage where outside-Warp control defaults off. Future inside-Warp enablement must use the same protected-storage class before it is exposed.
-- As an interim foundation step, the outside-Warp top-level enablement and granular permission bits live in the typed `LocalControlSettings` group as private settings with `SyncToCloud::Never`, explicit private storage keys, and no `toml_path`. This keeps them out of the user-visible settings file and generated settings schema while leaving the protected-storage migration as a required pre-ship hardening step.
-- Granular outside-Warp local-control permission storage under Settings > Scripting for metadata reads, underlying data reads, app-state mutations, metadata/configuration mutations, and underlying data mutations. Future inside-Warp permissions should be added only with verified terminal proof support.
+- New top-level Settings > Scripting page rendered only while `FeatureFlag::WarpControlCli` is enabled. The current foundation exposes one local-control mode with disabled, enabled within Warp, and enabled everywhere choices; verified inside-Warp proof acceptance is deferred until the proof broker exists.
+- Protected local-only mode storage where outside-Warp control defaults off unless the broadest mode is selected.
+- As an interim foundation step, the local-control mode lives in the typed `LocalControlSettings` group as a private setting with `SyncToCloud::Never`, an explicit private storage key, and no `toml_path`. This keeps it out of the user-visible settings file and generated settings schema while leaving the protected-storage migration as a required pre-ship hardening step.
 - Discovery registry and CLI instance selection.
 - A standalone `warpctrl` binary or artifact path that runs control commands without starting the GUI app runtime.
 - Per-process authenticated local-control server that refuses sensitive work when outside-Warp control is disabled and rejects inside-Warp credential requests until verified terminal proof support is implemented.
 - Scoped credential issuance/storage with no raw credentials in plaintext discovery records, including execution-context fields and authenticated-user grant fields.
 - App-side request bridge and selector resolver.
 - Action-category mapping and app-side safety-grant enforcement.
-- Action metadata for `tab.create` that deliberately classifies it as a logged-out-safe app-state mutation only when the user's granular local-control settings allow app-state mutation.
+- Action metadata for `tab.create` that deliberately classifies it as a logged-out-safe app-state mutation only when the selected local-control mode allows the invocation context.
 - Read-only `ping/version` plus `warpctrl instance list` or equivalent minimal discovery command.
 - End-to-end `warpctrl tab create` for the selected instance, reusing the same app behavior as the user-visible new-terminal-tab action.
 Why `tab.create` first:
@@ -322,7 +321,7 @@ Why `tab.create` first:
 The PR should also introduce the shell-facing CLI command grammar that the remainder of the protocol will reuse and establish a lightweight CLI startup path distinct from GUI startup.
 ### 10. Follow-up slices: fill out the remaining protocol in parallel
 After the first slice validates discovery, auth, selector resolution, CLI syntax, and server-to-app execution, follow-up slices can add the remaining allowlisted catalog in parallelized action-family groups. The baseline code should make new action additions mostly additive:
-- Extend `ControlAction`.
+- Extend the macro-backed action catalog.
 - Update the relevant `WarpCtrlBehavior` mappings for the internal app actions that implement, overlap with, exclude, or defer the behavior.
 - Add typed params/results.
 - Add a handler.
@@ -362,7 +361,7 @@ The intended v2 stack is:
 1. `zach/warp-cli-v2/contract-spec-sync` — create from `origin/master`. It owns the product, technical, security, and README specs plus the shared contract/foundation: protocol crate shape, discovery/auth scaffolding, selector and error types, action metadata/catalog structure, Scripting settings surface, protected local-control settings, local-control server/bridge skeleton, standalone `warpctrl` binary skeleton, packaging hooks, module split, `WarpCtrlBehavior` scaffolding, and the minimum first-slice smoke path needed to prove the end-to-end architecture.
 2. `zach/warp-cli-v2/auth-security` — create from `zach/warp-cli-v2/contract-spec-sync`. It owns authentication and security enforcement that applies across command families: scoped grants, execution-context policy, authenticated-user/API-key plumbing, denial paths, Settings > Scripting security controls, and tests proving high-risk actions cannot run without the required identity and permission category.
 3. `zach/warp-cli-v2/readonly-capability-targets` — create from `zach/warp-cli-v2/auth-security`. It owns structural metadata reads, capability/action metadata, target selector parsing and resolution, opaque IDs, active window/tab/pane/session targeting, metadata-read permission checks, and read-only CLI output for these surfaces. It must not expose terminal output, input buffers, history, Drive object contents, or other underlying user data.
-4. `zach/warp-cli-v2/appstate-file-drive-views` — create from `zach/warp-cli-v2/readonly-capability-targets`. It owns read-only app-state, file/project view, Drive view, block/input/history-style underlying-data read surfaces that are approved for the public catalog, along with the required underlying-data-read permission checks. It must keep local filesystem content reads/writes outside the v0 public catalog unless the specs are updated first.
+4. `zach/warp-cli-v2/appstate-file-drive-views` — create from `zach/warp-cli-v2/readonly-capability-targets`. It owns read-only app-state, file view, Drive view, block/input/history-style underlying-data read surfaces that are approved for the public catalog, along with the required underlying-data-read permission checks. It must keep local filesystem content reads/writes outside the v0 public catalog unless the specs are updated first.
 5. `zach/warp-cli-v2/metadata-config-mutations` — create from `zach/warp-cli-v2/appstate-file-drive-views`. It owns metadata/configuration mutations: allowlisted settings changes, labels/titles/appearance/configuration updates, settings or surface-opening commands that are metadata/configuration rather than underlying-data mutations, and tests proving unallowlisted or private settings are rejected.
 6. `zach/warp-cli-v2/drive-data-mutations` — create from `zach/warp-cli-v2/metadata-config-mutations`. It owns authenticated underlying-data mutations for Warp Drive objects, including typed object create/update/delete/insert and the approved v0 personal-to-team sharing path. It must use disposable resources in tests and must not implement local file content reads, writes, appends, deletes, or other filesystem-content mutations.
 7. `zach/warp-cli-v2/execution-underlying` — create from `zach/warp-cli-v2/drive-data-mutations`. It owns authenticated execution-underlying actions such as `input.run` and typed workflow execution where supported. It must require underlying-data-mutation permission plus authenticated scripting identity, deterministic target resolution, audit records, and tests proving accepted-command submission and agent-prompt submission remain unavailable.
@@ -405,7 +404,7 @@ Keep PR boundaries aligned with the v2 stack:
 - PR1: `zach/warp-cli-v2/contract-spec-sync` into `master` for specs, shared contracts, protocol, CLI skeleton, settings, bridge, module scaffolding, and first-slice smoke behavior.
 - PR2: `zach/warp-cli-v2/auth-security` into `zach/warp-cli-v2/contract-spec-sync` or its merged successor for auth/security enforcement, execution-context policy, scoped grants, and Settings > Scripting security controls.
 - PR3: `zach/warp-cli-v2/readonly-capability-targets` into `zach/warp-cli-v2/auth-security` or its merged successor for metadata reads, capabilities, target selectors, and read-only structural command output.
-- PR4: `zach/warp-cli-v2/appstate-file-drive-views` into `zach/warp-cli-v2/readonly-capability-targets` or its merged successor for approved underlying-data read surfaces, app-state/file/project/Drive views, and underlying-data-read permission tests.
+- PR4: `zach/warp-cli-v2/appstate-file-drive-views` into `zach/warp-cli-v2/readonly-capability-targets` or its merged successor for approved underlying-data read surfaces, app-state/file/Drive views, and underlying-data-read permission tests.
 - PR5: `zach/warp-cli-v2/metadata-config-mutations` into `zach/warp-cli-v2/appstate-file-drive-views` or its merged successor for metadata/configuration mutations, allowlisted settings changes, and configuration-denial tests.
 - PR6: `zach/warp-cli-v2/drive-data-mutations` into `zach/warp-cli-v2/metadata-config-mutations` or its merged successor for authenticated Warp Drive underlying-data mutations.
 - PR7: `zach/warp-cli-v2/execution-underlying` into `zach/warp-cli-v2/drive-data-mutations` or its merged successor for authenticated execution-underlying actions.
@@ -453,14 +452,14 @@ Map tests directly to `PRODUCT.md` behavior.
   - Tests must enumerate the implemented catalog and prove each implemented action has at least one parseable standalone CLI example that maps to the same `ActionKind`.
   - Tests must also prove each shipped parser route maps to an allowlisted catalog action and that help/completion generation includes the implemented route. `action list --implemented-only`, `capability list --implemented-only`, discovery metadata, shell completions, generated docs, and app-side bridge support must not drift silently from one another.
 - Security architecture:
-  - Protected enablement tests proving outside-Warp control defaults off, disabled outside-Warp context rejects credential issuance, sensitive discovery, and mutating requests with `local_control_disabled`, and current inside-Warp credential requests are rejected with `execution_context_not_allowed`.
+  - Protected mode tests proving outside-Warp control defaults off, disabled and inside-only modes reject outside-Warp credential issuance, sensitive discovery, and mutating requests with `local_control_disabled`, the broadest mode allows outside-Warp credential issuance, and current inside-Warp credential requests are rejected with `execution_context_not_allowed`.
   - Tests proving discovery in disabled state exposes no actionable endpoint authority or credential reference.
   - Credential-storage tests proving raw credentials are not written into plaintext discovery records.
   - Execution-context tests proving external clients cannot receive grants reserved for verified Warp-terminal invocations.
   - Permission-category enforcement tests proving insufficient grants fail with `insufficient_permissions` before selector resolution or handler dispatch, including separate denial cases for app-state mutation, metadata/configuration mutation, and underlying-data mutation.
   - Authenticated-user tests proving user-authenticated actions fail without a logged-in app user or authenticated-user grant.
   - External API-key tests proving missing, invalid, expired, revoked, wrong-subject, and insufficient-scope keys fail before selector resolution or handler dispatch.
-  - Settings > Scripting tests proving both top-level toggles and granular disabled categories invalidate credentials and prevent new grants.
+  - Settings > Scripting tests proving mode changes invalidate credentials and prevent new grants for invocation contexts no longer allowed.
   - Structured-error tests for disabled, unauthenticated, expired, revoked, insufficient-scope, execution-context-denied, authenticated-user-required, authenticated-user-unavailable, unsupported, malformed, ambiguous, missing-target, stale-target, and invalid-selector requests.
 - Behavior 1-6, 29-31:
   - Protocol version/unit tests.
@@ -491,7 +490,7 @@ Verification screenshots should make the cause and effect visible in a single im
 Before/after screenshots for visible mutations should preserve the same staggered layout so reviewers can compare the command context and UI state directly. If a single combined screenshot is not possible because of window-manager, display-size, or focus limitations, the verifier must capture paired screenshots with the same ordinal: one terminal-output screenshot that fully shows the command and output, and one UI screenshot that shows the resulting Warp state. The manifest entry should explain why the combined composition was not possible. Screenshots should not crop out the command, exit status, selected Warp target, or relevant visible UI effect.
 Before every computer-use scenario, the verifier must explicitly ask and answer, "What is the best way to show the impact of this CLI command?" The verifier should then put Warp into a state where the expected effect is clearly visible before running the command. For example, syntax-highlighting changes should start with recognizable text in the input editor that will visibly change; font-size and zoom changes should start with enough terminal text or UI chrome to compare scale; tab or pane rename/color commands should keep the affected tab or pane label visible; app-state mutation commands should make the target workspace, tab, pane, input box, or surface visible; and denial paths should show the relevant Settings > Scripting state or target state that makes the denial meaningful. Each manifest entry for a visible or user-facing command should describe the chosen proof setup, the expected visual effect, and any setup screenshot used to establish the before state.
 After each command that has a visible or user-facing result, the verifier must use computer vision on the captured screenshot or screen recording to inspect whether the visible Warp state matches the expected effect. The verifier should record the visual inspection result in the manifest, including unexpected UI changes, missing visual evidence, ambiguous screenshots, focus/onboarding artifacts, or differences between JSON success and the visible app state. JSON success alone is not sufficient for visible-effect validation; if the screenshot does not clearly prove the expected effect, the case should be marked failed or blocked with an explanation, even when the CLI response is successful.
-The verifier must exercise every invocation context implemented by the branch under review. For the current foundation branch, inside-Warp verification means proving `InsideWarp` requests are rejected and no inside-Warp Settings > Scripting controls are exposed. Once verified Warp-terminal support is implemented, the verifier must also run `warpctrl` from a terminal session inside the feature-flag-enabled Warp app and prove the app-issued execution-context proof is accepted and inside-Warp settings gate command categories. The outside-Warp path must run the same `warpctrl` binary from an external terminal or automation shell outside the built Warp app and prove outside-Warp control is default-off, then works only after enabling outside-Warp scripting and the required granular permissions in Settings > Scripting.
+The verifier must exercise every invocation context implemented by the branch under review. For the current foundation branch, inside-Warp verification means proving `InsideWarp` requests are rejected even though the default mode is enabled within Warp until proof verification exists. Once verified Warp-terminal support is implemented, the verifier must also run `warpctrl` from a terminal session inside the feature-flag-enabled Warp app and prove the app-issued execution-context proof is accepted and Settings > Scripting mode gates the invocation context. The outside-Warp path must run the same `warpctrl` binary from an external terminal or automation shell outside the built Warp app and prove outside-Warp control is default-off, then works only after selecting the broadest mode in Settings > Scripting.
 The verification matrix should cover every implemented command in `PRODUCT.md` at least once in JSON output mode. The verifier must capture a terminal-output screenshot for every command invocation, including successful calls, expected denials, unsupported stubs, and fail-closed policy gates. Where there is a visible UI effect, the verifier must also capture app UI screenshots after the command runs, and before the command when that is needed to prove a before/after state transition. At minimum:
 - read-only metadata commands show successful CLI output in a terminal screenshot and, for active/focus/list commands, a visible target that matches the output;
 - underlying data read commands show successful CLI output only when the underlying-data-read permission is enabled, plus terminal screenshots for disabled-permission denials;
@@ -549,9 +548,9 @@ flowchart LR
 - Browser-to-localhost abuse:
   - Mitigation: no permissive CORS, protected in-app enablement, explicit local auth, scoped grants, and mutating routes gated before selector resolution.
 - External apps silently enabling outside-Warp local control:
-  - Mitigation: the outside-Warp enablement state defaults off, lives in protected local storage behind Settings > Scripting, is local-only, is not Settings Sync'd, and is not writable through `warpctrl`, config files, registry/plist preference edits, defaults writes, or server-backed settings.
+  - Mitigation: outside-Warp control requires the broadest mode, which lives in protected local storage behind Settings > Scripting, is local-only, is not Settings Sync'd, and is not writable through `warpctrl`, config files, registry/plist preference edits, defaults writes, or server-backed settings.
 - External apps obtaining in-Warp authenticated-user grants:
-  - Mitigation: require an app-issued execution-context proof for Warp-terminal-only grants, do not trust caller-declared labels or plain environment variables as sole authority, and keep external authenticated-user grants behind a separate default-off permission.
+  - Mitigation: require an app-issued execution-context proof for Warp-terminal-only grants, do not trust caller-declared labels or plain environment variables as sole authority, and keep external authenticated-user grants behind the broadest local-control mode plus authenticated-scripting policy.
 - Logged-out requests touching user-authenticated data:
   - Mitigation: every action declares `requires_authenticated_user`, new actions default to true, and the bridge returns authenticated-user errors before selector resolution or dispatch.
 - Implementation drift from `SECURITY.md`:

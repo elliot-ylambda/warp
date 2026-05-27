@@ -1,12 +1,33 @@
 //! Layout mutation handlers for local-control actions.
 use ::local_control::protocol::TargetSelector;
 use ::local_control::{ActionKind, ControlError, ErrorCode, InstanceId};
-use serde_json::json;
+use serde::Serialize;
 use warpui::{ModelContext, TypedActionView};
 
 use crate::local_control::resolver::{target_window_id_for_target, validate_tab_create_target};
 use crate::local_control::LocalControlBridge;
 use crate::workspace::{Workspace, WorkspaceAction};
+#[derive(Serialize)]
+struct TabCreateResponse<'a> {
+    action: &'static str,
+    created: bool,
+    instance_id: Option<&'a str>,
+    window: TargetWindowResponse,
+    tab: TabCountsResponse,
+}
+
+#[derive(Serialize)]
+struct TargetWindowResponse {
+    selector: &'static str,
+    id: String,
+}
+
+#[derive(Serialize)]
+struct TabCountsResponse {
+    previous_count: usize,
+    count: usize,
+    active_index: usize,
+}
 
 pub(crate) fn create_terminal_tab(
     instance_id: &Option<InstanceId>,
@@ -39,18 +60,25 @@ pub(crate) fn create_terminal_tab(
                 workspace.active_tab_index(),
             )
         });
-    Ok(json!({
-        "action": ActionKind::TabCreate.as_str(),
-        "created": true,
-        "instance_id": instance_id.as_ref().map(|id| id.0.as_str()),
-        "window": {
-            "selector": "target",
-            "id": window_id.to_string(),
+    serde_json::to_value(TabCreateResponse {
+        action: ActionKind::TabCreate.as_str(),
+        created: true,
+        instance_id: instance_id.as_ref().map(|id| id.0.as_str()),
+        window: TargetWindowResponse {
+            selector: "target",
+            id: window_id.to_string(),
         },
-        "tab": {
-            "previous_count": previous_tab_count,
-            "count": tab_count,
-            "active_index": active_tab_index,
+        tab: TabCountsResponse {
+            previous_count: previous_tab_count,
+            count: tab_count,
+            active_index: active_tab_index,
         },
-    }))
+    })
+    .map_err(|err| {
+        ControlError::with_details(
+            ErrorCode::Internal,
+            "failed to serialize local-control tab.create response",
+            err.to_string(),
+        )
+    })
 }
