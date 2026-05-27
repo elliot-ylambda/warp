@@ -50,7 +50,7 @@ use crate::ai::agent_conversations_model::{
     AgentConversationsModelEvent,
 };
 use crate::ai::ai_document_view::AIDocumentView;
-use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::ai::ambient_agents::{AmbientAgentLiveSessionState, AmbientAgentTaskId};
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::ai::blocklist::history_model::CloudConversationData;
 use crate::ai::blocklist::inline_action::code_diff_view::CodeDiffView;
@@ -4015,6 +4015,16 @@ impl PaneGroup {
     /// Resolves a hydration action for a restored remote-child pane and
     /// applies it in place. Called both directly (sync path) and from the
     /// long-lived AgentConversationsModel subscription (async retry).
+    ///
+    /// Bypasses `AgentConversationsModel::resolve_open_action` because that
+    /// helper returns `RestoreOrNavigateToConversation` (or
+    /// `FocusTerminalViewInWorkspace`) once the local placeholder has been
+    /// eagerly hydrated into `conversations_by_id` by Fix C. For the
+    /// hydration path we instead inspect the `AmbientAgentTask` directly so
+    /// we keep `(a)` live-attach when a shared session is available and
+    /// `(b)` cloud-transcript merge as the fallback. The local placeholder's
+    /// `AIConversationId` remains the canonical key everywhere; we only
+    /// borrow the cloud transcript content.
     fn attempt_remote_child_hydration(
         &mut self,
         child_id: AIConversationId,
@@ -4038,69 +4048,69 @@ impl PaneGroup {
             return;
         };
 
-        let resolution = AgentConversationsModel::resolve_open_action(
-            AgentConversationNavigationSubject::Entry(AgentConversationEntryId::AmbientRun(
-                task_id,
-            )),
-            None,
-            ctx,
-        );
+        // Inspect the task directly. Bypassing resolve_open_action avoids
+        // its "navigate-to-local" routing for conversations already hydrated
+        // by Fix C.
+        let Some(task) = AgentConversationsModel::as_ref(ctx).get_task_data(&task_id) else {
+            log::warn!(
+                "[ORCH-RESTORE-DBG] attempt_remote_child_hydration: get_task_data returned None \
+                 for child={child_id} task_id={task_id:?}; leaving deferred entry in place",
+            );
+            return;
+        };
+
+        let live_state = task.active_live_session_state();
+        let server_token_str = task.conversation_id().map(str::to_owned);
         log::info!(
-            "[ORCH-RESTORE-DBG] attempt_remote_child_hydration: resolve_open_action result \
-             child={child_id} task_id={task_id:?} variant={variant}",
-            variant = match &resolution {
-                Some(WorkspaceAction::OpenOrAttachAmbientAgentConversation { .. }) =>
-                    "OpenOrAttachAmbientAgentConversation",
-                Some(WorkspaceAction::OpenConversationTranscriptViewer { .. }) =>
-                    "OpenConversationTranscriptViewer",
-                Some(_) => "Other",
-                None => "None",
-            },
+            "[ORCH-RESTORE-DBG] attempt_remote_child_hydration: task inspect \
+             child={child_id} task_id={task_id:?} live_state={live:?} conversation_id={cid:?}",
+            live = live_state,
+            cid = server_token_str,
         );
 
-        match resolution {
-            Some(WorkspaceAction::OpenOrAttachAmbientAgentConversation { task_id, .. }) => {
+        match live_state {
+            AmbientAgentLiveSessionState::Attachable { .. } => {
                 log::info!(
-                    "[ORCH-RESTORE-DBG] attempt_remote_child_hydration: dispatching to \
-                     enter_remote_child_existing_session_in_place child={child_id} pane={pane_id:?}",
+                    "[ORCH-RESTORE-DBG] attempt_remote_child_hydration: live session attachable; \
+                     dispatching to enter_remote_child_existing_session_in_place \
+                     child={child_id} pane={pane_id:?}",
                 );
                 self.enter_remote_child_existing_session_in_place(pane_id, child_id, task_id, ctx);
             }
-            Some(WorkspaceAction::OpenConversationTranscriptViewer {
-                conversation_id: server_token,
-                ambient_agent_task_id: _,
-            }) => {
-                log::info!(
-                    "[ORCH-RESTORE-DBG] attempt_remote_child_hydration: dispatching to \
-                     hydrate_remote_child_transcript_in_place child={child_id} pane={pane_id:?} \
-                     server_token={server_token:?}",
-                );
-                self.hydrate_remote_child_transcript_in_place(
-                    pane_id,
-                    child_id,
-                    task_id,
-                    server_token,
-                    ctx,
-                );
-            }
-            _ => {
-                // No live session and no transcript — fall back to the
-                // existing behavior: enter the (possibly empty) ambient
-                // session and insert the conversation-ended tombstone. This
-                // matches the pre-Fix-B behavior so we are never worse than
-                // today.
-                log::warn!(
-                    "[ORCH-RESTORE-DBG] attempt_remote_child_hydration: fallback (no live session, \
-                     no transcript) for child={child_id} pane={pane_id:?}; entering empty \
-                     ambient session + tombstone",
-                );
-                self.enter_remote_child_existing_session_in_place(pane_id, child_id, task_id, ctx);
-                if let Some(terminal_view) = self.terminal_view_from_pane_id(pane_id, ctx) {
-                    terminal_view.update(ctx, |view, ctx| {
-                        view.insert_conversation_ended_tombstone_with_resolved_cta(ctx);
-                    });
+            AmbientAgentLiveSessionState::Inactive
+            | AmbientAgentLiveSessionState::ActiveUnattachable => match server_token_str {
+                Some(token) => {
+                    let server_token = ServerConversationToken::new(token);
+                    log::info!(
+                        "[ORCH-RESTORE-DBG] attempt_remote_child_hydration: no live session; \
+                         dispatching to hydrate_remote_child_transcript_in_place \
+                         child={child_id} pane={pane_id:?} server_token={server_token:?}",
+                    );
+                    self.hydrate_remote_child_transcript_in_place(
+                        pane_id,
+                        child_id,
+                        task_id,
+                        server_token,
+                        ctx,
+                    );
                 }
-            }
+                None => {
+                    log::warn!(
+                        "[ORCH-RESTORE-DBG] attempt_remote_child_hydration: fallback \
+                         (no live session, no server conversation token) for \
+                         child={child_id} pane={pane_id:?}; entering empty ambient session + \
+                         tombstone",
+                    );
+                    self.enter_remote_child_existing_session_in_place(
+                        pane_id, child_id, task_id, ctx,
+                    );
+                    if let Some(terminal_view) = self.terminal_view_from_pane_id(pane_id, ctx) {
+                        terminal_view.update(ctx, |view, ctx| {
+                            view.insert_conversation_ended_tombstone_with_resolved_cta(ctx);
+                        });
+                    }
+                }
+            },
         }
     }
 
@@ -4163,6 +4173,11 @@ impl PaneGroup {
         server_token: ServerConversationToken,
         ctx: &mut ViewContext<Self>,
     ) {
+        log::info!(
+            "[ORCH-RESTORE-DBG] hydrate_remote_child_transcript_in_place: entry \
+             pane={pane_id:?} child={child_id} task_id={task_id:?} \
+             server_token={server_token:?}",
+        );
         let history_handle = BlocklistAIHistoryModel::handle(ctx);
         let future = history_handle.update(ctx, |history_model, ctx| {
             history_model.load_conversation_by_server_token(&server_token, ctx)
@@ -4174,14 +4189,33 @@ impl PaneGroup {
                 .copied()
                 .filter(|p| *p == pane_id && group.has_pane_id(*p))
             else {
+                log::warn!(
+                    "[ORCH-RESTORE-DBG] hydrate_remote_child_transcript_in_place: pane \
+                     mapping changed during fetch; abandoning child={child_id}",
+                );
                 return;
             };
+            let load_result_kind = match &conversation {
+                Some(CloudConversationData::Oz(_)) => "Some(Oz)",
+                Some(CloudConversationData::CLIAgent(_)) => "Some(CLIAgent)",
+                None => "None",
+            };
+            log::info!(
+                "[ORCH-RESTORE-DBG] hydrate_remote_child_transcript_in_place: \
+                 load_conversation_by_server_token result={load_result_kind} child={child_id}",
+            );
             match conversation {
                 Some(CloudConversationData::Oz(cloud)) => {
                     let tasks: Vec<warp_multi_agent_api::Task> = cloud
                         .all_tasks()
                         .filter_map(|task| task.source().cloned())
                         .collect();
+                    let tasks_count = tasks.len();
+                    log::info!(
+                        "[ORCH-RESTORE-DBG] hydrate_remote_child_transcript_in_place: \
+                         calling merge_cloud_tasks_into_existing_conversation \
+                         child={child_id} tasks_to_merge={tasks_count}",
+                    );
                     let cloud_conversation = *cloud;
                     let merge_result =
                         BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, _| {
@@ -4193,6 +4227,13 @@ impl PaneGroup {
                         });
                     match merge_result {
                         Ok(merged) => {
+                            log::info!(
+                                "[ORCH-RESTORE-DBG] hydrate_remote_child_transcript_in_place: \
+                                 merge_cloud_tasks_into_existing_conversation OK \
+                                 child={child_id} tasks_merged={tasks_count} \
+                                 merged_exchange_count={mec}",
+                                mec = merged.exchange_count(),
+                            );
                             if let Some(terminal_view) =
                                 group.terminal_view_from_pane_id(pane_id, ctx)
                             {
