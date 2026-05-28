@@ -669,6 +669,21 @@ fn test_format_match_error() {
     let err = DiffApplicationError::UnmatchedDiffs {
         file: "file.txt".to_string(),
         match_failures: DiffMatchFailures {
+            fuzzy_match_failures: 1,
+            noop_deltas: 1,
+            missing_line_numbers: 0,
+            fuzzy_match_failure_details: Vec::new(),
+        },
+    };
+
+    assert_eq!(
+        err.to_conversation_message(),
+        "Could not apply all diffs to file.txt. The changes to file.txt were already made."
+    );
+
+    let err = DiffApplicationError::UnmatchedDiffs {
+        file: "file.txt".to_string(),
+        match_failures: DiffMatchFailures {
             fuzzy_match_failures: 2,
             noop_deltas: 2,
             missing_line_numbers: 0,
@@ -688,7 +703,7 @@ fn test_format_match_error() {
 
 #[test]
 fn test_format_match_error_caps_failure_details() {
-    let details = (0..4)
+    let details = (0..6)
         .map(|index| DiffMatchFailure {
             search: format!("bad search {index}"),
             replace: None,
@@ -698,7 +713,7 @@ fn test_format_match_error_caps_failure_details() {
     let err = DiffApplicationError::UnmatchedDiffs {
         file: "file.txt".to_string(),
         match_failures: DiffMatchFailures {
-            fuzzy_match_failures: 4,
+            fuzzy_match_failures: 6,
             noop_deltas: 0,
             missing_line_numbers: 0,
             fuzzy_match_failure_details: details,
@@ -707,8 +722,8 @@ fn test_format_match_error_caps_failure_details() {
 
     let message = err.to_conversation_message();
     assert!(message.contains("bad search 0"));
-    assert!(message.contains("bad search 2"));
-    assert!(!message.contains("bad search 3"));
+    assert!(message.contains("bad search 4"));
+    assert!(!message.contains("bad search 5"));
     assert!(message.contains("...and 1 more failed diff(s)."));
 }
 

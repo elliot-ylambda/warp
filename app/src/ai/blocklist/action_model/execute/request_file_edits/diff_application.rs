@@ -184,7 +184,6 @@ fn append_fuzzy_match_failure_details(message: &mut String, match_failures: &Dif
 }
 
 fn append_fuzzy_match_failure(message: &mut String, failure: &DiffMatchFailure) {
-
     if let Some(range) = &failure.range {
         let end_line = range.end.saturating_sub(1);
         if range.start == end_line {
