@@ -12,7 +12,9 @@ clap = { workspace = true, features = ["derive", "env"] }
 cfg-if = { workspace = true }
 humantime.workspace = true
 jaq-all.workspace = true
+local_control.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 url = { workspace = true, features = ["serde"] }
 uuid = { workspace = true }
 warp_core = { path = "../warp_core" }

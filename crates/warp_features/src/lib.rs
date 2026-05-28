@@ -879,6 +879,9 @@ pub enum FeatureFlag {
 
     /// Gates the Grouped Tabs feature.
     GroupedTabs,
+
+    /// Gates the local Warp Control CLI foundation.
+    WarpControlCli,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
