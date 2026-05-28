@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize};
-use warp_multi_agent_api::{self as api, response_event::stream_finished};
+use warp_multi_agent_api::response_event::stream_finished;
+use warp_multi_agent_api::{self as api};
 
 use super::schema::{
     active_mcp_servers, agent_conversations, agent_tasks, ai_document_panes, ai_memory_panes,
@@ -1044,6 +1045,9 @@ pub struct AgentConversationData {
     /// agent executing on a remote worker.
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_remote_child: bool,
+    /// Whether the root task was still optimistic when this conversation was persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_task_is_optimistic: Option<bool>,
     /// The server-assigned run identifier (`ai_tasks.id`) for v2 orchestration.
     /// For local agents this arrives via StreamInit; for cloud agents it will
     /// come from SpawnAgentResponse once the local→cloud spawn path is wired.
@@ -1056,6 +1060,10 @@ pub struct AgentConversationData {
     /// delivery without re-delivering already-processed events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_event_sequence: Option<i64>,
+    /// Whether the user has pinned this child agent in the orchestration
+    /// pill bar. Orchestrator conversations always serialize as `false`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1082,6 +1090,10 @@ pub fn token_usage_category_display_name(category: &str) -> String {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelTokenUsage {
+    /// Identifier used for both display and replay. For warp/byok rows this is the
+    /// server-known model id; for custom endpoint rows this is the resolved alias
+    /// (or fallback label) — the upstream `config_key` is translated into this
+    /// label once at ingestion time and is not retained separately.
     pub model_id: String,
     /// Alias for backward compat: old persisted data used `total_tokens` for warp usage.
     #[serde(default, alias = "total_tokens")]
@@ -1089,9 +1101,13 @@ pub struct ModelTokenUsage {
     #[serde(default)]
     pub byok_tokens: u32,
     #[serde(default)]
+    pub custom_endpoint_tokens: u32,
+    #[serde(default)]
     pub warp_token_usage_by_category: HashMap<TokenUsageCategory, u32>,
     #[serde(default)]
     pub byok_token_usage_by_category: HashMap<TokenUsageCategory, u32>,
+    #[serde(default)]
+    pub custom_endpoint_token_usage_by_category: HashMap<TokenUsageCategory, u32>,
 }
 
 impl ModelTokenUsage {
@@ -1124,16 +1140,37 @@ impl ModelTokenUsage {
     pub fn to_proto_byok_usage(&self) -> Option<(String, stream_finished::ModelTokenUsage)> {
         self.to_proto_usage(self.byok_tokens, &self.byok_token_usage_by_category)
     }
+    #[allow(deprecated)]
+    pub fn to_proto_custom_endpoint_usage(
+        &self,
+    ) -> Option<(String, stream_finished::ModelTokenUsage)> {
+        if self.custom_endpoint_tokens == 0 {
+            return None;
+        }
+        Some((
+            self.model_id.clone(),
+            stream_finished::ModelTokenUsage {
+                model_id: self.model_id.clone(),
+                total_tokens: self.custom_endpoint_tokens,
+                token_usage_by_category: self
+                    .custom_endpoint_token_usage_by_category
+                    .iter()
+                    .map(|(cat, tokens)| (cat.clone(), *tokens))
+                    .collect(),
+            },
+        ))
+    }
 
     #[allow(deprecated)]
     pub fn to_proto_combined(&self) -> stream_finished::ModelTokenUsage {
         stream_finished::ModelTokenUsage {
             model_id: self.model_id.clone(),
-            total_tokens: self.warp_tokens + self.byok_tokens,
+            total_tokens: self.warp_tokens + self.byok_tokens + self.custom_endpoint_tokens,
             token_usage_by_category: self
                 .warp_token_usage_by_category
                 .iter()
                 .chain(self.byok_token_usage_by_category.iter())
+                .chain(self.custom_endpoint_token_usage_by_category.iter())
                 .fold(HashMap::new(), |mut acc, (cat, tokens)| {
                     *acc.entry(cat.clone()).or_insert(0) += tokens;
                     acc
@@ -1349,7 +1386,9 @@ pub struct NewMCPServerInstallation {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentConversationData;
+    use std::collections::HashMap;
+
+    use super::{AgentConversationData, ModelTokenUsage};
 
     #[test]
     fn agent_conversation_data_roundtrips_last_event_sequence() {
@@ -1364,9 +1403,11 @@ mod tests {
             orchestration_harness_type: Some("claude".to_string()),
             parent_conversation_id: None,
             is_remote_child: false,
+            root_task_is_optimistic: None,
             run_id: None,
             autoexecute_override: None,
             last_event_sequence: Some(42),
+            pinned: false,
         };
         let json = serde_json::to_string(&data).expect("serialize");
         let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
@@ -1399,13 +1440,39 @@ mod tests {
             orchestration_harness_type: None,
             parent_conversation_id: None,
             is_remote_child: true,
+            root_task_is_optimistic: None,
             run_id: None,
             autoexecute_override: None,
             last_event_sequence: None,
+            pinned: false,
         };
         let json = serde_json::to_string(&data).expect("serialize");
         let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
         assert!(roundtripped.is_remote_child);
+    }
+
+    #[test]
+    fn agent_conversation_data_roundtrips_optimistic_root_marker() {
+        let data = AgentConversationData {
+            server_conversation_token: None,
+            conversation_usage_metadata: None,
+            reverted_action_ids: None,
+            forked_from_server_conversation_token: None,
+            artifacts_json: None,
+            parent_agent_id: None,
+            agent_name: None,
+            orchestration_harness_type: None,
+            parent_conversation_id: None,
+            is_remote_child: false,
+            root_task_is_optimistic: Some(true),
+            run_id: None,
+            autoexecute_override: None,
+            last_event_sequence: None,
+            pinned: false,
+        };
+        let json = serde_json::to_string(&data).expect("serialize");
+        let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(roundtripped.root_task_is_optimistic, Some(true));
     }
 
     #[test]
@@ -1433,15 +1500,109 @@ mod tests {
             orchestration_harness_type: None,
             parent_conversation_id: None,
             is_remote_child: false,
+            root_task_is_optimistic: None,
             run_id: None,
             autoexecute_override: None,
             last_event_sequence: None,
+            pinned: false,
         };
         let json = serde_json::to_string(&data).expect("serialize");
         assert!(
             !json.contains("last_event_sequence"),
             "None should be skipped in serialized output: {json}"
         );
+    }
+
+    #[test]
+    fn agent_conversation_data_roundtrips_pinned() {
+        let data = AgentConversationData {
+            server_conversation_token: None,
+            conversation_usage_metadata: None,
+            reverted_action_ids: None,
+            forked_from_server_conversation_token: None,
+            artifacts_json: None,
+            parent_agent_id: None,
+            agent_name: None,
+            orchestration_harness_type: None,
+            parent_conversation_id: None,
+            is_remote_child: false,
+            root_task_is_optimistic: None,
+            run_id: None,
+            autoexecute_override: None,
+            last_event_sequence: None,
+            pinned: true,
+        };
+        let json = serde_json::to_string(&data).expect("serialize");
+        let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
+        assert!(roundtripped.pinned);
+    }
+
+    #[test]
+    fn agent_conversation_data_skips_serializing_unpinned() {
+        let data = AgentConversationData {
+            server_conversation_token: None,
+            conversation_usage_metadata: None,
+            reverted_action_ids: None,
+            forked_from_server_conversation_token: None,
+            artifacts_json: None,
+            parent_agent_id: None,
+            agent_name: None,
+            orchestration_harness_type: None,
+            parent_conversation_id: None,
+            is_remote_child: false,
+            root_task_is_optimistic: None,
+            run_id: None,
+            autoexecute_override: None,
+            last_event_sequence: None,
+            pinned: false,
+        };
+        let json = serde_json::to_string(&data).expect("serialize");
+        assert!(
+            !json.contains("pinned"),
+            "Unpinned default should be skipped: {json}"
+        );
+    }
+
+    #[test]
+    fn agent_conversation_data_legacy_rows_default_to_unpinned() {
+        let legacy_json = r#"{"server_conversation_token":null}"#;
+        let data: AgentConversationData =
+            serde_json::from_str(legacy_json).expect("legacy rows must deserialize");
+        assert!(!data.pinned);
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn model_token_usage_replays_custom_endpoint_usage_by_model_id() {
+        let usage = ModelTokenUsage {
+            model_id: "Friendly alias".to_string(),
+            custom_endpoint_tokens: 6,
+            custom_endpoint_token_usage_by_category: HashMap::from([(
+                "primary_agent".to_string(),
+                6,
+            )]),
+            ..Default::default()
+        };
+
+        let (key, proto) = usage
+            .to_proto_custom_endpoint_usage()
+            .expect("custom endpoint usage should serialize for replay");
+
+        assert_eq!(key, "Friendly alias");
+        assert_eq!(proto.model_id, "Friendly alias");
+        assert_eq!(proto.total_tokens, 6);
+        assert_eq!(proto.token_usage_by_category.get("primary_agent"), Some(&6));
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn model_token_usage_replay_skips_non_custom_endpoint_entries() {
+        let warp_only = ModelTokenUsage {
+            model_id: "warp-model".to_string(),
+            warp_tokens: 4,
+            ..Default::default()
+        };
+        assert!(warp_only.to_proto_custom_endpoint_usage().is_none());
     }
 }
 

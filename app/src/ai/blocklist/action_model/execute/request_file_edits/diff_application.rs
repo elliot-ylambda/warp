@@ -1,11 +1,11 @@
 //! Module containing helper code to apply suggested diffs from an LLM
 //! to a set of files on the user's filesystem.
 
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    future::Future,
-    sync::Arc,
-};
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
+use std::future::Future;
+use std::sync::Arc;
 
 use ai::diff_validation::{
     fuzzy_match_diffs, fuzzy_match_v4a_diffs, AIRequestedCodeDiff, DiffDelta, DiffMatchFailure,
@@ -15,21 +15,17 @@ use itertools::Itertools;
 use vec1::Vec1;
 use warpui::r#async::executor::Background;
 
-use crate::{
-    ai::{
-        agent::{AIIdentifiers, FileEdit},
-        blocklist::SessionContext,
-        paths::host_native_absolute_path,
-    },
-    auth::auth_state::AuthState,
-    safe_debug, safe_warn, send_telemetry_on_executor,
-};
-
 use super::telemetry::{
     DiffInvalidFileEvent, DiffMatchFailedEvent, MissingLineNumbersEvent,
     RequestFileEditsTelemetryEvent,
 };
-const MAX_FUZZY_MATCH_FAILURE_DETAILS: usize = 3;
+use crate::ai::agent::{AIIdentifiers, FileEdit};
+use crate::ai::blocklist::SessionContext;
+use crate::ai::paths::host_native_absolute_path;
+use crate::auth::auth_state::AuthState;
+use crate::{safe_debug, safe_warn, send_telemetry_on_executor};
+
+const MAX_FUZZY_MATCH_FAILURE_DETAILS: usize = 5;
 
 /// Result of reading a file from disk or a remote server.
 ///
@@ -104,7 +100,6 @@ impl DiffApplicationError {
                 file,
                 match_failures,
             } => {
-                use std::fmt::Write;
                 let mut message = String::new();
                 if match_failures.fuzzy_match_failures > 0 {
                     let _ = write!(message, "Could not apply all diffs to {file}.");
@@ -113,10 +108,10 @@ impl DiffApplicationError {
 
                 if match_failures.noop_deltas > 0 {
                     if !message.is_empty() {
-                        if message.contains('\n') {
-                            message.push('\n');
-                        } else {
+                        if match_failures.fuzzy_match_failure_details.is_empty() {
                             message.push(' ');
+                        } else {
+                            message.push('\n');
                         }
                     }
                     let _ = write!(message, "The changes to {file} were already made.");
@@ -168,8 +163,6 @@ fn append_fuzzy_match_failure_details(message: &mut String, match_failures: &Dif
         return;
     }
 
-    use std::fmt::Write;
-
     message.push_str(" The following search blocks could not be matched:");
     for (index, failure) in match_failures
         .fuzzy_match_failure_details
@@ -191,7 +184,6 @@ fn append_fuzzy_match_failure_details(message: &mut String, match_failures: &Dif
 }
 
 fn append_fuzzy_match_failure(message: &mut String, failure: &DiffMatchFailure) {
-    use std::fmt::Write;
 
     if let Some(range) = &failure.range {
         let end_line = range.end.saturating_sub(1);
@@ -409,6 +401,10 @@ where
     let v4a_files: HashSet<String> = v4a_deltas.keys().cloned().collect();
     let new_file_paths: HashSet<String> = new_files.keys().cloned().collect();
     let deleted_file_paths: HashSet<String> = deleted_files.iter().cloned().collect();
+    let replacement_file_paths: HashSet<String> = new_file_paths
+        .intersection(&deleted_file_paths)
+        .cloned()
+        .collect();
 
     for (file_path, deltas) in search_replace_deltas {
         // If a file is also being explicitly created/deleted, skip applying edits to avoid
@@ -445,12 +441,18 @@ where
             result
                 .errors
                 .push(DiffApplicationError::MultipleFileCreation { file });
+        } else if replacement_file_paths.contains(&file) {
+            apply_replace_file(file, content, session_context, read_file, &mut result).await;
         } else {
             apply_create_file(file, content, session_context, read_file, &mut result).await;
         }
     }
 
     for file in deleted_files {
+        if replacement_file_paths.contains(&file) {
+            continue;
+        }
+
         if new_file_paths.contains(&file)
             || search_replace_files.contains(&file)
             || v4a_files.contains(&file)
@@ -465,6 +467,62 @@ where
     }
 
     result
+}
+
+async fn apply_replace_file<F, Fut>(
+    file_path: String,
+    content: String,
+    session_context: &SessionContext,
+    read_file: &F,
+    result: &mut DiffResult,
+) where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = FileReadResult>,
+{
+    let absolute_path = host_native_absolute_path(
+        &file_path,
+        session_context.shell(),
+        session_context.current_working_directory(),
+    );
+
+    match read_file(absolute_path.clone()).await {
+        FileReadResult::Found(file_content) => {
+            let num_lines = file_content.lines().count();
+            let replacement_line_range = if num_lines == 0 {
+                0..0
+            } else {
+                1..num_lines.saturating_add(1)
+            };
+
+            result.diffs.push(AIRequestedCodeDiff {
+                file_name: file_path,
+                diff_type: DiffType::update(
+                    vec![DiffDelta {
+                        replacement_line_range,
+                        insertion: content,
+                    }],
+                    None,
+                ),
+                failures: None,
+                original_content: file_content,
+            });
+        }
+        FileReadResult::NotFound => {
+            result
+                .errors
+                .push(DiffApplicationError::MissingFile { file: file_path });
+        }
+        FileReadResult::ReadError(err) => {
+            safe_warn!(
+                safe: ("Unable to read file for Agent Code: {err}"),
+                full: ("Unable to read file {absolute_path:?} for Agent Code: {err}")
+            );
+            result.errors.push(DiffApplicationError::ReadFailed {
+                file: file_path,
+                message: err,
+            });
+        }
+    }
 }
 
 /// Converts a file-creation request into a diff.

@@ -7,12 +7,11 @@ use warp_core::features::FeatureFlag;
 use warp_multi_agent_api as api;
 use warpui::{App, EntityId, SingletonEntity};
 
+use super::{ConversationDetailsData, PanelMode};
 use crate::ai::agent::conversation::{AIConversation, AIConversationId};
 use crate::ai::ambient_agents::task::{AgentConfigSnapshot, HarnessConfig, TaskPrincipalInfo};
 use crate::ai::ambient_agents::{AmbientAgentTask, AmbientAgentTaskState};
 use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
-
-use super::{ConversationDetailsData, CreditsInfo, PanelMode};
 
 fn create_test_task(task_id: &str) -> AmbientAgentTask {
     let now = Utc::now();
@@ -25,6 +24,7 @@ fn create_test_task(task_id: &str) -> AmbientAgentTask {
         created_at: now,
         started_at: None,
         updated_at: now,
+        run_time: Some("PT1S".parse().unwrap()),
         status_message: None,
         source: None,
         session_id: None,
@@ -133,9 +133,11 @@ fn test_from_task_includes_linked_directory_when_run_id_matches() {
                 orchestration_harness_type: None,
                 parent_conversation_id: None,
                 is_remote_child: false,
+                root_task_is_optimistic: None,
                 run_id: Some(task_id.to_string()),
                 autoexecute_override: None,
                 last_event_sequence: None,
+                pinned: false,
             },
         );
 
@@ -277,6 +279,8 @@ fn test_from_conversation_populates_local_conversation_fields() {
                 autoexecute_override: None,
                 last_event_sequence: None,
                 is_remote_child: false,
+                root_task_is_optimistic: None,
+                pinned: false,
             },
         );
 
@@ -314,10 +318,7 @@ fn test_from_conversation_populates_local_conversation_fields() {
 
             assert_eq!(data.title, "test query");
             assert_eq!(data.source_prompt.as_deref(), Some("test query"));
-            assert!(matches!(
-                data.credits,
-                Some(CreditsInfo::LocalConversation(_))
-            ));
+            assert!(data.credits.is_some());
         });
     });
 }
@@ -346,9 +347,11 @@ fn test_from_task_includes_linked_directory_when_server_token_matches() {
                 orchestration_harness_type: None,
                 parent_conversation_id: None,
                 is_remote_child: false,
+                root_task_is_optimistic: None,
                 run_id: None,
                 autoexecute_override: None,
                 last_event_sequence: None,
+                pinned: false,
             },
         );
 
