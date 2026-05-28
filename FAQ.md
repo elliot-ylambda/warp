@@ -12,8 +12,6 @@ Start with a GitHub issue. Bug reports can go straight to a code PR once they ar
 
 Use the [issue templates](https://github.com/warpdotdev/warp/issues/new/choose). For bugs, include reproduction steps, expected vs. actual behavior, your Warp version (`Settings → About`), and OS. For features, describe the user-facing problem before proposing an implementation.
 
-If you're already running Warp, the `/feedback` command files an issue with logs and environment details attached automatically.
-
 ### What do the readiness labels mean?
 
 - **`ready-to-spec`** — the problem is understood, the design is open. Next step is a spec PR.

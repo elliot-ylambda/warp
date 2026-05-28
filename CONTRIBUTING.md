@@ -58,8 +58,6 @@ flowchart TD
 
 Search [existing issues](https://github.com/warpdotdev/warp/issues) before filing to avoid duplicates. Use the issue templates when filing.
 
-If you're already running Warp, the fastest way to file is the `/feedback` command — it opens a public GitHub issue with relevant context (logs, environment details) automatically attached.
-
 ### Bug reports
 
 A good bug report includes:

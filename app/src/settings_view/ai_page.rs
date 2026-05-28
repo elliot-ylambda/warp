@@ -433,7 +433,8 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
                 &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
                 flags::FEEDBACK_BUNDLED_SKILL_FLAG,
             )
-            .with_group(bindings::BindingGroup::WarpAi),
+            .with_group(bindings::BindingGroup::WarpAi)
+            .with_enabled(|| FeatureFlag::FeedbackSkill.is_enabled()),
             ToggleSettingActionPair::new(
                 "model picker in prompt",
                 builder(SettingsAction::AI(
@@ -6341,20 +6342,22 @@ impl SettingsWidget for OtherAIWidget {
             &view.local_only_icon_tooltip_states,
             app,
         ));
-        column.add_child(render_ai_setting_toggle::<FeedbackBundledSkillEnabled>(
-            "Enable built-in feedback skill",
-            AISettingsPageAction::ToggleFeedbackBundledSkill,
-            *ai_settings.feedback_bundled_skill_enabled,
-            is_toggleable,
-            self.feedback_bundled_skill_toggle.clone(),
-            &view.local_only_icon_tooltip_states,
-            app,
-        ));
-        column.add_child(render_ai_setting_description(
-            "Let Oz use Warp's built-in skill for turning Warp product feedback into GitHub issues.",
-            is_toggleable,
-            app,
-        ));
+        if FeatureFlag::FeedbackSkill.is_enabled() {
+            column.add_child(render_ai_setting_toggle::<FeedbackBundledSkillEnabled>(
+                "Enable built-in feedback skill",
+                AISettingsPageAction::ToggleFeedbackBundledSkill,
+                *ai_settings.feedback_bundled_skill_enabled,
+                is_toggleable,
+                self.feedback_bundled_skill_toggle.clone(),
+                &view.local_only_icon_tooltip_states,
+                app,
+            ));
+            column.add_child(render_ai_setting_description(
+                "Let Oz use Warp's built-in skill for turning Warp product feedback into GitHub issues.",
+                is_toggleable,
+                app,
+            ));
+        }
 
         column.add_child(render_dropdown_item(
             appearance,
