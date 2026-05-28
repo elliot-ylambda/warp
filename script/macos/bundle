@@ -558,6 +558,35 @@ EOF
   # Make the script executable
   chmod +x "$CLI_SCRIPT_PATH"
 
+  if [[ ",$FEATURES," =~ ",warp_control_cli," ]]; then
+    WARPCTRL_BIN="warpctrl"
+    WARPCTRL_OUTPUT_PATH="$BUNDLED_RESOURCES_DIR/bin/$WARPCTRL_BIN"
+
+    if [[ $BUILD_BINARY = true ]]; then
+      pushd app > /dev/null
+      echo "Building $WARPCTRL_BIN for channel $RELEASE_CHANNEL with profile $CARGO_PROFILE"
+      cargo build --profile "$CARGO_PROFILE" --bin "$WARPCTRL_BIN" --target "$DEFAULT_TARGET" --features "$FEATURES"
+      if [[ $UNIVERSAL_BINARY = true ]]; then
+        echo "Building $WARPCTRL_BIN for $ADDITIONAL_TARGET to include in universal binary"
+        cargo build --profile "$CARGO_PROFILE" --bin "$WARPCTRL_BIN" --target "$ADDITIONAL_TARGET" --features "$FEATURES"
+      fi
+      popd > /dev/null
+    else
+      echo "Skipping $WARPCTRL_BIN build due to --skip-build flag"
+    fi
+
+    if [[ $UNIVERSAL_BINARY = true ]]; then
+      echo "Building universal $WARPCTRL_BIN binary using lipo."
+      lipo -create -output "$WARPCTRL_OUTPUT_PATH" \
+          "target/$INTEL_TARGET/$TARGET_PROFILE_DIR/$WARPCTRL_BIN" \
+          "target/$ARM_TARGET/$TARGET_PROFILE_DIR/$WARPCTRL_BIN"
+    else
+      echo "Copying $WARPCTRL_BIN into $WARPCTRL_OUTPUT_PATH"
+      cp "target/$DEFAULT_TARGET/$TARGET_PROFILE_DIR/$WARPCTRL_BIN" "$WARPCTRL_OUTPUT_PATH"
+    fi
+    chmod +x "$WARPCTRL_OUTPUT_PATH"
+  fi
+
   # Store the built artifact locations for GitHub Actions outputs.
   BINARY_PATH="target/$DEFAULT_TARGET/$TARGET_PROFILE_DIR/$WARP_BIN"
   DMG_PATH="$OUT_DIR/$FINAL_DMG_NAME"

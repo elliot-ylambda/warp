@@ -224,6 +224,10 @@ fi
 if [[ "$BUILD" == "true" ]]; then
   echo "Building and bundling Warp for channel $RELEASE_CHANNEL and bundle id $BUNDLE_ID"
   cargo build -p warp --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --features "$FEATURES"
+  if [[ "$ARTIFACT" == "app" && ",$FEATURES," =~ ",warp_control_cli," ]]; then
+    echo "Building warpctrl for channel $RELEASE_CHANNEL with profile $CARGO_PROFILE"
+    cargo build -p warp --profile "$CARGO_PROFILE" --bin warpctrl --features "$FEATURES"
+  fi
   echo "Making debug copy of '$EXECUTABLE_PATH' at '$DEBUG_EXECUTABLE_PATH'"
   cp "$EXECUTABLE_PATH" "$DEBUG_EXECUTABLE_PATH"
 
@@ -239,6 +243,10 @@ if [[ "$BUILD" == "true" ]]; then
   fi
 else
   echo 'Skipping `cargo build` step due to --skip-build argument'
+fi
+
+if [[ "$ARTIFACT" == "app" && ",$FEATURES," =~ ",warp_control_cli," ]]; then
+  WARPCTRL_EXECUTABLE_PATH="$CARGO_TARGET_OUTPUT_DIR/warpctrl"
 fi
 
 # Prepare bundled resources for CLI builds.
@@ -270,6 +278,7 @@ export \
   RELEASE_CHANNEL \
   BUNDLE_ID \
   EXECUTABLE_PATH \
+  WARPCTRL_EXECUTABLE_PATH \
   BINARY_NAME \
   APPIMAGE_NAME \
   BUILD_ARCH \

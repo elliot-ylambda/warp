@@ -53,6 +53,12 @@ name = "generate_settings_schema"
 path = "src/bin/generate_settings_schema.rs"
 test = false
 
+[[bin]]
+name = "warpctrl"
+path = "src/bin/warpctrl.rs"
+required-features = ["warp_control_cli"]
+test = false
+
 [dependencies]
 addr = "0.15.6"
 ai.workspace = true
@@ -126,6 +132,7 @@ jemalloc_pprof = { version = "0.8.1", optional = true, features = [
 ] }
 lsp-types = "0.97.0"
 indexmap = { version = "2.0.2", features = ["serde"] }
+local_control.workspace = true
 input_classifier.workspace = true
 instant.workspace = true
 ipc.workspace = true
@@ -431,6 +438,7 @@ embed-resource = "3.0"
 
 # Note that we support channel-specific enables for these features
 [features]
+warp_control_cli = ["warp_cli/warp_control_cli"]
 ai_resume_button = []
 autoupdate = []
 figma_detection = []

@@ -877,6 +877,9 @@ pub enum FeatureFlag {
     /// Enables the code review view for remote sessions.
     RemoteCodeReview,
 
+    /// Enables the local Warp control CLI foundation.
+    WarpControlCli,
+
     /// Gates the Grouped Tabs feature.
     GroupedTabs,
 }

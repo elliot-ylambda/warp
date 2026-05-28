@@ -1094,6 +1094,10 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub(crate) fn local_control_tab_snapshot(&self) -> (usize, usize) {
+        (self.tabs.len(), self.active_tab_index)
+    }
+
     pub fn is_tab_drag_preview(&self) -> bool {
         self.is_tab_drag_preview
     }

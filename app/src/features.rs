@@ -81,6 +81,8 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::ShellSelector,
         #[cfg(feature = "integration_command")]
         FeatureFlag::IntegrationCommand,
+        #[cfg(feature = "warp_control_cli")]
+        FeatureFlag::WarpControlCli,
         #[cfg(feature = "artifact_command")]
         FeatureFlag::ArtifactCommand,
         #[cfg(feature = "cloud_environments")]
