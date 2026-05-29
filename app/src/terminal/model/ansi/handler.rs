@@ -105,6 +105,9 @@ pub trait Handler {
     /// Set current position as a tabstop.
     fn set_horizontal_tabstop(&mut self);
 
+    /// Set or clear the active OSC 8 hyperlink target.
+    fn set_hyperlink(&mut self, _uri: Option<String>) {}
+
     /// Scroll up `rows` rows.
     fn scroll_up(&mut self, _: usize) -> ScrollDelta;
 

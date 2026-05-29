@@ -924,6 +924,28 @@ where
                 unhandled(params);
             }
 
+            // OSC 8: Hyperlink.
+            // Format: OSC 8 ; params ; URI ST
+            // An empty URI closes the active hyperlink. The params field (for
+            // attributes like id=...) is accepted but not interpreted; link
+            // identity is tracked by the target URI stored on written cells.
+            b"8" => {
+                if params.len() >= 3 {
+                    // OSC parameters are split on `;`, but URI payloads can
+                    // contain unescaped semicolons. Rejoin params[2..] so the
+                    // target is not silently truncated.
+                    let payload = params[2..]
+                        .iter()
+                        .map(|x| str::from_utf8(x))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(|parts| parts.join(";"));
+                    if let Ok(uri) = payload {
+                        self.handler.set_hyperlink((!uri.is_empty()).then_some(uri));
+                        return;
+                    }
+                }
+                unhandled(params);
+            }
             // Set color index.
             b"4" => {
                 if params.len() > 1 && !params.len().is_multiple_of(2) {

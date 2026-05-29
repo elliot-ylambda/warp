@@ -594,6 +594,10 @@ impl ansi::Handler for GridHandler {
         self.ansi_handler_state.tabs[self.grid.cursor().point.col] = true;
     }
 
+    fn set_hyperlink(&mut self, uri: Option<String>) {
+        self.grid.cursor.template.set_hyperlink(uri);
+    }
+
     fn scroll_up(&mut self, lines: usize) -> ScrollDelta {
         let origin = self.ansi_handler_state.scroll_region.start;
         self.scroll_up_relative(origin, lines)
@@ -1586,6 +1590,12 @@ impl GridHandler {
         let fg = self.grid.cursor().template.fg;
         let bg = self.grid.cursor().template.bg;
         let flags = self.grid.cursor().template.flags;
+        let hyperlink = self
+            .grid
+            .cursor()
+            .template
+            .hyperlink()
+            .map(ToOwned::to_owned);
 
         let cursor_cell = self.grid.cursor_cell();
 
@@ -1595,6 +1605,7 @@ impl GridHandler {
         cursor_cell.fg = fg;
         cursor_cell.bg = bg;
         cursor_cell.flags = flags;
+        cursor_cell.set_hyperlink(hyperlink);
 
         cursor_cell
     }

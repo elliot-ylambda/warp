@@ -805,6 +805,10 @@ impl ansi::Handler for BlockGrid {
         self.ansi_handler().set_horizontal_tabstop();
     }
 
+    fn set_hyperlink(&mut self, uri: Option<String>) {
+        self.ansi_handler().set_hyperlink(uri);
+    }
+
     fn scroll_up(&mut self, lines: usize) -> ScrollDelta {
         self.ansi_handler().scroll_up(lines)
     }

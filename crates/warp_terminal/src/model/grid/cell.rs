@@ -117,6 +117,8 @@ struct CellExtra {
     /// base character and zerowidth characters).
     cell_with_zero_width: Option<String>,
     end_of_prompt: Option<EndOfPromptMarker>,
+    #[serde(default)]
+    hyperlink: Option<String>,
 }
 
 /// Content and attributes of a single cell in the terminal grid.
@@ -276,6 +278,28 @@ impl Cell {
         });
     }
 
+    /// Returns the OSC 8 hyperlink target associated with this cell, if any.
+    #[inline]
+    pub fn hyperlink(&self) -> Option<&str> {
+        self.extra.as_ref()?.hyperlink.as_deref()
+    }
+
+    /// Sets or clears the OSC 8 hyperlink target associated with this cell.
+    #[inline]
+    pub fn set_hyperlink(&mut self, hyperlink: Option<String>) {
+        match hyperlink {
+            Some(hyperlink) => {
+                self.extra.get_or_insert_with(Box::default).hyperlink = Some(hyperlink);
+            }
+            None => {
+                if let Some(extra) = self.extra.as_mut() {
+                    extra.hyperlink = None;
+                }
+                self.drop_extra_if_empty();
+            }
+        }
+    }
+
     /// Free all dynamically allocated cell storage. Preserves EndOfPromptMarker if present.
     #[inline]
     pub fn drop_extra(&mut self) {
@@ -285,6 +309,17 @@ impl Cell {
                 self.mark_end_of_prompt(end_of_prompt_marker.has_extra_trailing_newline);
             }
             // If `end_of_prompt` is None, `extra` is dropped here and not put back.
+        }
+    }
+
+    #[inline]
+    fn drop_extra_if_empty(&mut self) {
+        if self.extra.as_ref().is_some_and(|extra| {
+            extra.cell_with_zero_width.is_none()
+                && extra.end_of_prompt.is_none()
+                && extra.hyperlink.is_none()
+        }) {
+            self.extra = None;
         }
     }
 }

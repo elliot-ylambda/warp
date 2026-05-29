@@ -646,6 +646,9 @@ impl GridHandler {
     }
 
     pub fn url_at_point(&self, displayed_point: Point) -> Option<Link> {
+        if let Some(hyperlink) = self.osc8_hyperlink_at_point(displayed_point) {
+            return Some(hyperlink);
+        }
         let original_point = self.maybe_translate_point_from_displayed_to_original(displayed_point);
         let row = original_point.row;
         let col = original_point.col;
@@ -809,6 +812,73 @@ impl GridHandler {
             }
             Some(url)
         }
+    }
+
+    pub fn hyperlink_at_range<T: RangeInModel>(&self, item: &T) -> Option<String> {
+        let start = self.maybe_translate_point_from_displayed_to_original(*item.range().start());
+        self.row(start.row)?
+            .get(start.col)?
+            .hyperlink()
+            .map(ToOwned::to_owned)
+    }
+
+    fn osc8_hyperlink_at_point(&self, displayed_point: Point) -> Option<Link> {
+        let original_point = self.maybe_translate_point_from_displayed_to_original(displayed_point);
+        let row = original_point.row;
+        let col = original_point.col;
+
+        let grid_line = self.row(row)?;
+        let line_length = grid_line.line_length();
+
+        // Omit cases when user is hovering over blank spaces after the end of a line.
+        if col >= line_length {
+            return None;
+        }
+
+        let uri = grid_line.get(col)?.hyperlink()?.to_owned();
+
+        let mut start = original_point;
+        let mut cursor = self.grapheme_cursor_from(original_point, grapheme_cursor::Wrap::Soft);
+        cursor.move_backward();
+        while let Some(item) = cursor.current_item() {
+            if item.cell().hyperlink() != Some(uri.as_str()) {
+                break;
+            }
+            start = item.point();
+            cursor.move_backward();
+        }
+
+        let mut end = original_point;
+        let mut cursor = self.grapheme_cursor_from(original_point, grapheme_cursor::Wrap::Soft);
+        cursor.move_forward();
+        while let Some(item) = cursor.current_item() {
+            if item.cell().hyperlink() != Some(uri.as_str()) {
+                break;
+            }
+            end = item.point();
+            cursor.move_forward();
+        }
+
+        let mut hyperlink = Link {
+            range: start..=end,
+            is_empty: false,
+        };
+
+        if self.has_displayed_output() {
+            let displayed_start =
+                self.maybe_translate_point_from_original_to_displayed(*hyperlink.range.start());
+            let displayed_end =
+                self.maybe_translate_point_from_original_to_displayed(*hyperlink.range.end());
+            if displayed_start > displayed_end {
+                log::error!(
+                    "OSC 8 hyperlink translation to displayed points failed. Displayed range start {displayed_start:?} is greater than displayed range end {displayed_end:?}"
+                );
+            } else {
+                hyperlink.range = displayed_start..=displayed_end;
+            }
+        }
+
+        Some(hyperlink)
     }
 
     /// Converts a cell to a string, with ansi escape sequences

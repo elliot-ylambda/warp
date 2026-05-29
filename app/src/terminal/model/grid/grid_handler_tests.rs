@@ -27,6 +27,20 @@ fn has_wide_char_character(blockgrid: &BlockGrid) -> bool {
     false
 }
 
+fn blockgrid_from_ansi(bytes: &[u8], rows: usize, columns: usize) -> BlockGrid {
+    let mut blockgrid = BlockGrid::new(
+        SizeInfo::new_without_font_metrics(rows, columns),
+        MAX_SCROLL_LIMIT,
+        ChannelEventListener::new_for_test(),
+        ObfuscateSecrets::No,
+        PerformResetGridChecks::No,
+    );
+    let mut processor = ansi::Processor::new();
+    blockgrid.start();
+    processor.parse_bytes(&mut blockgrid, bytes, &mut std::io::sink());
+    blockgrid
+}
+
 #[test]
 fn test_line_selection() {
     let blockgrid = mock_blockgrid(
@@ -645,6 +659,98 @@ fn test_finds_url_in_grid() {
             range: Point { row: 0, col: 4 }..=Point { row: 0, col: 21 },
             is_empty: false
         })
+    );
+}
+
+#[test]
+fn test_find_osc8_hyperlink_in_grid() {
+    let blockgrid = blockgrid_from_ansi(
+        b"\x1b]8;;https://example.com\x1b\\label\x1b]8;;\x1b\\ tail",
+        3,
+        80,
+    );
+
+    let link = blockgrid
+        .grid_handler
+        .url_at_point(Point { row: 0, col: 0 })
+        .expect("OSC 8 label should be detected as a link");
+    assert_eq!(
+        link,
+        Link {
+            range: Point { row: 0, col: 0 }..=Point { row: 0, col: 4 },
+            is_empty: false
+        }
+    );
+    assert_eq!(
+        blockgrid.grid_handler.hyperlink_at_range(&link),
+        Some("https://example.com".to_owned())
+    );
+    assert_eq!(
+        blockgrid
+            .grid_handler
+            .url_at_point(Point { row: 0, col: 6 }),
+        None
+    );
+}
+
+#[test]
+fn test_find_osc8_bel_terminated_hyperlink() {
+    let blockgrid = blockgrid_from_ansi(
+        b"\x1b]8;;https://example.com/bel\x07label\x1b]8;;\x07",
+        3,
+        80,
+    );
+
+    let link = blockgrid
+        .grid_handler
+        .url_at_point(Point { row: 0, col: 2 })
+        .expect("BEL-terminated OSC 8 label should be detected as a link");
+    assert_eq!(
+        blockgrid.grid_handler.hyperlink_at_range(&link),
+        Some("https://example.com/bel".to_owned())
+    );
+}
+
+#[test]
+fn test_find_osc8_hyperlink_uri_with_semicolon() {
+    let blockgrid = blockgrid_from_ansi(
+        b"\x1b]8;;https://example.com/a;b?c=d\x1b\\label\x1b]8;;\x1b\\",
+        3,
+        80,
+    );
+
+    let link = blockgrid
+        .grid_handler
+        .url_at_point(Point { row: 0, col: 4 })
+        .expect("OSC 8 label should be detected as a link");
+    assert_eq!(
+        blockgrid.grid_handler.hyperlink_at_range(&link),
+        Some("https://example.com/a;b?c=d".to_owned())
+    );
+}
+
+#[test]
+fn test_find_osc8_hyperlink_line_wrapping() {
+    let blockgrid = blockgrid_from_ansi(
+        b"\x1b]8;;https://example.com/wrapped\x1b\\wraplink\x1b]8;;\x1b\\",
+        3,
+        4,
+    );
+
+    let link = blockgrid
+        .grid_handler
+        .url_at_point(Point { row: 1, col: 2 })
+        .expect("wrapped OSC 8 label should be detected as a link");
+    assert_eq!(
+        link,
+        Link {
+            range: Point { row: 0, col: 0 }..=Point { row: 1, col: 3 },
+            is_empty: false
+        }
+    );
+    assert_eq!(
+        blockgrid.grid_handler.hyperlink_at_range(&link),
+        Some("https://example.com/wrapped".to_owned())
     );
 }
 

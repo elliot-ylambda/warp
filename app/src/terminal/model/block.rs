@@ -3081,6 +3081,10 @@ impl ansi::Handler for Block {
         delegate!(self.set_horizontal_tabstop());
     }
 
+    fn set_hyperlink(&mut self, uri: Option<String>) {
+        delegate!(self.set_hyperlink(uri));
+    }
+
     fn scroll_up(&mut self, rows: usize) -> ScrollDelta {
         delegate!(self.scroll_up(rows))
     }

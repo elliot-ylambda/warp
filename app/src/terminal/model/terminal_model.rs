@@ -1829,6 +1829,11 @@ impl TerminalModel {
         item: &WithinModel<T>,
         respect_obfuscated_secrets: RespectObfuscatedSecrets,
     ) -> String {
+        if let Ok(Some(hyperlink)) =
+            item.read_from_grid(self, |grid, item| Ok(grid.hyperlink_at_range(item)))
+        {
+            return hyperlink;
+        }
         let text = self.string_at_range(item, respect_obfuscated_secrets);
         text.trim_matches(['\u{200B}', ' ', '\n', '\r', '\t'])
             .to_owned()
@@ -2586,6 +2591,10 @@ impl ansi::Handler for TerminalModel {
 
     fn set_horizontal_tabstop(&mut self) {
         delegate!(self.set_horizontal_tabstop());
+    }
+
+    fn set_hyperlink(&mut self, uri: Option<String>) {
+        delegate!(self.set_hyperlink(uri));
     }
 
     fn scroll_up(&mut self, rows: usize) -> ScrollDelta {
