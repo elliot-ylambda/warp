@@ -31,6 +31,14 @@ use watcher::{BulkFilesystemWatcher, BulkFilesystemWatcherEvent};
 pub mod text_file_reader;
 pub use text_file_reader::{TextFileReadResult, TextFileSegment};
 
+/// Maximum file size (in bytes) that the code editor will load into memory.
+/// Files larger than this threshold are rejected with `FileLoadError::FileTooLarge`
+/// to prevent excessive memory usage during buffer loading and layout.
+/// The editor's layout system creates multiple in-memory structures per line
+/// (BlockItem nodes, text frames, selections, etc.), so a file that is large on
+/// disk can consume 5-10x more memory once fully laid out.
+const MAX_EDITOR_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
+
 #[derive(Debug)]
 pub enum FileModelEvent {
     FileLoaded {
@@ -411,9 +419,7 @@ impl FileModel {
         let use_individual_watcher = watcher_type == WatcherType::Individual;
         let future = ctx.spawn(
             async move {
-                let contents = async_fs::read_to_string(&file_path_buf)
-                    .await
-                    .map_err(FileLoadError::from);
+                let contents = Self::read_content_with_size_check(&file_path_buf).await;
                 (file_id, contents)
             },
             move |me, (file_id, load_result), ctx| match load_result {
@@ -467,9 +473,36 @@ impl FileModel {
         if !Self::file_exists(file_path).await {
             return Err(FileLoadError::DoesNotExist);
         }
+        Self::check_file_size(file_path).await?;
         async_fs::read_to_string(file_path)
             .await
             .map_err(FileLoadError::from)
+    }
+
+    /// Read a file's content after checking that it does not exceed
+    /// [`MAX_EDITOR_FILE_SIZE`]. Used by [`Self::open`] to prevent loading
+    /// files that are too large for the editor's layout system.
+    async fn read_content_with_size_check(file_path: &Path) -> Result<String, FileLoadError> {
+        Self::check_file_size(file_path).await?;
+        async_fs::read_to_string(file_path)
+            .await
+            .map_err(FileLoadError::from)
+    }
+
+    /// Returns `Err(FileLoadError::FileTooLarge)` if `file_path` exceeds
+    /// [`MAX_EDITOR_FILE_SIZE`].
+    async fn check_file_size(file_path: &Path) -> Result<(), FileLoadError> {
+        let metadata = async_fs::metadata(file_path)
+            .await
+            .map_err(FileLoadError::from)?;
+        let size = metadata.len();
+        if size > MAX_EDITOR_FILE_SIZE {
+            return Err(FileLoadError::FileTooLarge {
+                size_bytes: size,
+                limit_bytes: MAX_EDITOR_FILE_SIZE,
+            });
+        }
+        Ok(())
     }
 
     /// Asynchronously reads specific lines from a file using BufReader.
