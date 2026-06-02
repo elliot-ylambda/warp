@@ -226,7 +226,7 @@ impl FileTreeView {
 
         match pending_edit.kind {
             PendingEditKind::CreateNewFile => {
-                let new_entry = match {
+                let create_result = {
                     let Some(root_dir) = self.root_directories.get_mut(&file_tree_id.root) else {
                         return;
                     };
@@ -252,7 +252,9 @@ impl FileTreeView {
                     } else {
                         return;
                     }
-                } {
+                };
+
+                let new_entry = match create_result {
                     Ok(new_entry) => new_entry,
                     Err(()) => {
                         self.remove_create_placeholder(&file_tree_id);
@@ -271,7 +273,7 @@ impl FileTreeView {
                 self.rebuild_flattened_items();
             }
             PendingEditKind::CreateNewDirectory => {
-                let new_entry = match {
+                let create_result = {
                     let Some(root_dir) = self.root_directories.get_mut(&file_tree_id.root) else {
                         return;
                     };
@@ -297,7 +299,9 @@ impl FileTreeView {
                     } else {
                         return;
                     }
-                } {
+                };
+
+                let new_entry = match create_result {
                     Ok(new_entry) => new_entry,
                     Err(()) => {
                         self.remove_create_placeholder(&file_tree_id);
