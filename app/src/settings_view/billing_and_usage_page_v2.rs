@@ -769,9 +769,11 @@ impl BillingAndUsagePageV2View {
 
         let has_base_credits = ai_model.request_limit() > 0;
 
-        // At-cost transparent pricing: the dollar allowance is the charged unit,
-        // so surface it as the headline of the Balance section. The credit cards
-        // below remain as a shadow/legacy view during the migration.
+        // Transparent pricing swaps this section between the at-cost dollar
+        // allowance (the charged unit) and the legacy credit cards. The two
+        // are mutually exclusive: dollars show only when the flag is on,
+        // credits only when it is off.
+        let show_dollars = FeatureFlag::TransparentPricing.is_enabled();
         let allowance_cents = ai_model.allowance_cents();
         let remaining_cents = ai_model.remaining_cents();
         let used_cents = ai_model.used_cents();
@@ -783,7 +785,15 @@ impl BillingAndUsagePageV2View {
             .map(|ws| ws.uid);
         let classified = ClassifiedGrants::new(grants, workspace_uid);
 
-        if !has_base_credits && !classified.has_any() && !has_dollar_allowance {
+        // Show the section only when the active view has something to render:
+        // the dollar view needs an allowance; the credits view needs base or
+        // bonus credits.
+        let has_content = if show_dollars {
+            has_dollar_allowance
+        } else {
+            has_base_credits || classified.has_any()
+        };
+        if !has_content {
             return None;
         }
 
@@ -863,7 +873,7 @@ impl BillingAndUsagePageV2View {
             .finish(),
         );
 
-        if has_dollar_allowance {
+        if show_dollars {
             let format_dollars = |cents: i64| {
                 let dollars = cents / 100;
                 let rem = (cents.abs() % 100) as u8;
@@ -904,7 +914,11 @@ impl BillingAndUsagePageV2View {
             );
         }
 
-        column.add_child(cards_row.finish());
+        // Credit balance cards are the legacy view; hidden under transparent
+        // pricing so the dollar allowance above stands alone.
+        if !show_dollars {
+            column.add_child(cards_row.finish());
+        }
         column.add_child(
             ConstrainedBox::new(Empty::new().finish())
                 .with_height(24.)
