@@ -52,14 +52,22 @@ fn test_initial_join_failure_only_schedules_one_pending_retry() {
     App::test((), |mut app| async move {
         let (network, _) = create_network(&mut app);
         network.update(&mut app, |network, ctx| {
-            network.stage = Stage::BeforeJoined;
+            network.stage = Stage::before_joined();
             network.retry_initial_join_after_transport_failure(ctx);
             network.retry_initial_join_after_transport_failure(ctx);
         });
 
         network.read(&app, |network, _| {
-            assert_eq!(network.initial_join_retry_count, 1);
-            assert!(network.initial_join_retry_timer.is_some());
+            let Stage::BeforeJoined {
+                retry_count,
+                retry_timer,
+                ..
+            } = &network.stage
+            else {
+                panic!("network should still be before joined");
+            };
+            assert_eq!(*retry_count, 1);
+            assert!(retry_timer.is_some());
         });
     });
 }
