@@ -47,8 +47,8 @@ pub fn render_block(block: &AgentBlock, width: u16) -> Vec<u8> {
     let inner = w - 4; // │ + space + content + space + │
     let mut out = String::new();
 
-    // Top border
-    let _ = write!(out, "{color}╭─");
+    // Top border — \r ensures cursor starts at column 1 in raw mode.
+    let _ = write!(out, "\r{color}╭─");
     if let Some(header) = &block.header {
         let max_header = inner.saturating_sub(2);
         let truncated: String = header.chars().take(max_header).collect();
@@ -63,7 +63,7 @@ pub fn render_block(block: &AgentBlock, width: u16) -> Vec<u8> {
             out.push('─');
         }
     }
-    let _ = writeln!(out, "─╮{RESET}");
+    let _ = write!(out, "─╮{RESET}\r\n");
 
     // Body lines
     let lines = wrap_text(&block.body, inner);
@@ -71,25 +71,25 @@ pub fn render_block(block: &AgentBlock, width: u16) -> Vec<u8> {
     for line in &body_lines {
         let visible_len = line.chars().count();
         let padding = inner.saturating_sub(visible_len);
-        let _ = write!(out, "{color}│{RESET} {line}");
+        let _ = write!(out, "\r{color}│{RESET} {line}");
         for _ in 0..padding {
             out.push(' ');
         }
-        let _ = writeln!(out, " {color}│{RESET}");
+        let _ = write!(out, " {color}│{RESET}\r\n");
     }
 
     // Bottom border
-    let _ = write!(out, "{color}╰");
+    let _ = write!(out, "\r{color}╰");
     for _ in 0..(w - 2) {
         out.push('─');
     }
-    let _ = writeln!(out, "╯{RESET}");
+    let _ = write!(out, "╯{RESET}\r\n");
 
     out.into_bytes()
 }
 
 pub fn render_thinking_indicator() -> Vec<u8> {
-    format!("{DIM_MAGENTA}⠋ thinking...{RESET}\n").into_bytes()
+    format!("{DIM_MAGENTA}⠋ thinking...{RESET}\r\n").into_bytes()
 }
 
 pub fn render_agent_input_prompt(input: &str, cursor_pos: usize) -> Vec<u8> {
@@ -389,6 +389,33 @@ mod tests {
         let out = render_block(&block, 40);
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("\x1b[2;33m"), "expected dim yellow ANSI code");
+    }
+
+    #[test]
+    fn render_block_uses_crlf() {
+        let block = AgentBlock {
+            kind: BlockKind::AgentText,
+            header: Some("test".into()),
+            body: "body".into(),
+        };
+        let out = render_block(&block, 30);
+        // Every line ending must be \r\n for raw-mode terminals.
+        assert!(!out.windows(1).any(|w| w == b"\n") || out.windows(2).filter(|w| w == b"\r\n").count() > 0,
+            "render_block must use \\r\\n line endings");
+        // More specific: count bare \n (not preceded by \r)
+        let bare_lf = out.windows(2).enumerate().filter(|(_i, w)| {
+            w[1] == b'\n' && w[0] != b'\r'
+        }).count();
+        // Also check the first byte isn't a bare \n
+        let first_is_bare_lf = out.first() == Some(&b'\n');
+        assert!(!first_is_bare_lf && bare_lf == 0,
+            "found {bare_lf} bare LF(s) without preceding CR");
+    }
+
+    #[test]
+    fn thinking_indicator_uses_crlf() {
+        let out = render_thinking_indicator();
+        assert!(out.ends_with(b"\r\n"), "thinking indicator must end with \\r\\n");
     }
 
     /// Strip ANSI escape sequences for visible-width assertions.
