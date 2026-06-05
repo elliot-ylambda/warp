@@ -3644,7 +3644,8 @@ impl Workspace {
                 ..
             }
             | TabSettingsChangedEvent::VerticalTabsShowPrLink { .. }
-            | TabSettingsChangedEvent::VerticalTabsShowDiffStats { .. } => {
+            | TabSettingsChangedEvent::VerticalTabsShowDiffStats { .. }
+            | TabSettingsChangedEvent::ShowVerticalTabsSearchBar { .. } => {
                 ctx.notify();
             }
             TabSettingsChangedEvent::VerticalTabsShowDetailsOnHover { .. } => {
@@ -19367,25 +19368,31 @@ impl Workspace {
 
             let left_padding = self.compute_tab_bar_left_padding(ctx);
 
+            // The center slot holds the search bar. When the user hides it, we
+            // keep an empty flexible spacer in its place so the right-side
+            // controls remain right-aligned.
+            let center_slot: Box<dyn Element> = if *TabSettings::as_ref(ctx)
+                .show_vertical_tabs_search_bar
+                .value()
+            {
+                Clipped::new(
+                    Container::new(
+                        Align::new(self.render_title_bar_search_bar(appearance)).finish(),
+                    )
+                    .with_padding_left(TITLE_BAR_SEARCH_BAR_SLOT_PADDING)
+                    .with_padding_right(TITLE_BAR_SEARCH_BAR_SLOT_PADDING)
+                    .finish(),
+                )
+                .finish()
+            } else {
+                Empty::new().finish()
+            };
+
             let tab_bar = Flex::row()
                 .with_main_axis_size(MainAxisSize::Max)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_child(tab_bar.finish())
-                .with_child(
-                    Shrinkable::new(
-                        1.,
-                        Clipped::new(
-                            Container::new(
-                                Align::new(self.render_title_bar_search_bar(appearance)).finish(),
-                            )
-                            .with_padding_left(TITLE_BAR_SEARCH_BAR_SLOT_PADDING)
-                            .with_padding_right(TITLE_BAR_SEARCH_BAR_SLOT_PADDING)
-                            .finish(),
-                        )
-                        .finish(),
-                    )
-                    .finish(),
-                )
+                .with_child(Shrinkable::new(1., center_slot).finish())
                 .with_child(right_controls.finish())
                 .finish();
 
@@ -21637,6 +21644,11 @@ impl Workspace {
             context
                 .set
                 .insert(flags::USE_LATEST_USER_PROMPT_AS_CONVERSATION_TITLE_IN_TAB_NAMES_FLAG);
+        }
+        if *tab_settings.show_vertical_tabs_search_bar.value() {
+            context
+                .set
+                .insert(flags::SHOW_VERTICAL_TABS_SEARCH_BAR_FLAG);
         }
         if self.should_show_session_config_tab_config_chip() {
             context

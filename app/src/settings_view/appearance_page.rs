@@ -91,9 +91,9 @@ use crate::window_settings::{
 use crate::workspace::header_toolbar_editor::HeaderToolbarInlineEditor;
 use crate::workspace::tab_settings::{
     DirectoryTabColor, PreserveActiveTabColor, ShowCodeReviewButton, ShowIndicatorsButton,
-    ShowVerticalTabPanelInRestoredWindows, TabCloseButtonPosition, TabSettings,
-    TabSettingsChangedEvent, UseLatestUserPromptAsConversationTitleInTabNames, UseVerticalTabs,
-    WorkspaceDecorationVisibility,
+    ShowVerticalTabPanelInRestoredWindows, ShowVerticalTabsSearchBar, TabCloseButtonPosition,
+    TabSettings, TabSettingsChangedEvent, UseLatestUserPromptAsConversationTitleInTabNames,
+    UseVerticalTabs, WorkspaceDecorationVisibility,
 };
 use crate::workspace::WorkspaceAction;
 use crate::{report_error, report_if_error, send_telemetry_from_ctx, themes};
@@ -428,6 +428,14 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
             context,
             flags::USE_LATEST_USER_PROMPT_AS_CONVERSATION_TITLE_IN_TAB_NAMES_FLAG,
         ));
+        toggle_binding_pairs.push(ToggleSettingActionPair::new(
+            "search bar in vertical tabs",
+            builder(SettingsAction::AppearancePageToggle(
+                AppearancePageAction::ToggleShowVerticalTabsSearchBar,
+            )),
+            context,
+            flags::SHOW_VERTICAL_TABS_SEARCH_BAR_FLAG,
+        ));
     }
 
     if FeatureFlag::Ligatures.is_enabled() {
@@ -519,6 +527,7 @@ pub enum AppearancePageAction {
     ToggleVerticalTabs,
     ToggleShowVerticalTabPanelInRestoredWindows,
     ToggleUseLatestUserPromptAsConversationTitleInTabNames,
+    ToggleShowVerticalTabsSearchBar,
     ToggleLigatureRendering,
     ToggleBlurTexture,
     ToggleLeftPanelVisibility,
@@ -663,6 +672,7 @@ impl TypedActionView for AppearanceSettingsPageView {
             ToggleUseLatestUserPromptAsConversationTitleInTabNames => {
                 self.toggle_use_latest_user_prompt_as_conversation_title_in_tab_names(ctx)
             }
+            ToggleShowVerticalTabsSearchBar => self.toggle_show_vertical_tabs_search_bar(ctx),
             ToggleLigatureRendering => self.toggle_ligature_rendering(ctx),
             ToggleFocusPaneOnHover => {
                 PaneSettings::handle(ctx).update(ctx, |pane_settings, ctx| {
@@ -1464,6 +1474,7 @@ impl AppearanceSettingsPageView {
             tab_settings_widgets.push(Box::new(
                 UseLatestUserPromptAsConversationTitleInTabNamesWidget::default(),
             ));
+            tab_settings_widgets.push(Box::new(ShowVerticalTabsSearchBarWidget::default()));
             if FeatureFlag::ConfigurableToolbar.is_enabled() {
                 tab_settings_widgets.push(Box::new(EditToolbarWidget));
             }
@@ -2406,6 +2417,14 @@ impl AppearanceSettingsPageView {
         TabSettings::handle(ctx).update(ctx, |settings, ctx| {
             report_if_error!(settings
                 .use_latest_user_prompt_as_conversation_title_in_tab_names
+                .toggle_and_save_value(ctx));
+        });
+    }
+
+    fn toggle_show_vertical_tabs_search_bar(&mut self, ctx: &mut ViewContext<Self>) {
+        TabSettings::handle(ctx).update(ctx, |settings, ctx| {
+            report_if_error!(settings
+                .show_vertical_tabs_search_bar
                 .toggle_and_save_value(ctx));
         });
     }
@@ -4771,6 +4790,54 @@ impl SettingsWidget for UseLatestUserPromptAsConversationTitleInTabNamesWidget {
                 .finish(),
             Some(
                 "Show the latest user prompt instead of the generated conversation title for Oz and third-party agent sessions in vertical tabs."
+                    .to_string(),
+            ),
+        )
+    }
+}
+
+#[derive(Default)]
+struct ShowVerticalTabsSearchBarWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for ShowVerticalTabsSearchBarWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "vertical tabs search bar top header chrome hide command palette"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let tab_settings = TabSettings::as_ref(app);
+
+        render_body_item::<AppearancePageAction>(
+            "Show search bar in vertical tabs".into(),
+            None,
+            LocalOnlyIconState::for_setting(
+                ShowVerticalTabsSearchBar::storage_key(),
+                ShowVerticalTabsSearchBar::sync_to_cloud(),
+                &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                app,
+            ),
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*tab_settings.show_vertical_tabs_search_bar)
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(AppearancePageAction::ToggleShowVerticalTabsSearchBar);
+                })
+                .finish(),
+            Some(
+                "Show the search bar in the vertical tabs header. Search stays available through the Command Palette and its keyboard shortcut."
                     .to_string(),
             ),
         )
