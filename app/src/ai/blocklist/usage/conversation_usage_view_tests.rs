@@ -152,6 +152,34 @@ fn custom_endpoint_models_use_the_external_key_icon_bucket() {
 }
 
 #[test]
+fn visible_models_use_public_client_id_for_display_lookup() {
+    let view = ConversationUsageView::new(
+        ConversationUsageInfo {
+            models: vec![ModelTokenUsage {
+                model_id: "GPT-5.4 (extra high reasoning)".to_string(),
+                client_model_id: Some("gpt-5-4-xhigh".to_string()),
+                warp_tokens: 6,
+                warp_token_usage_by_category: HashMap::from([(
+                    PRIMARY_AGENT_CATEGORY.to_string(),
+                    6,
+                )]),
+                ..Default::default()
+            }],
+            ..placeholder_usage_info()
+        },
+        DisplayMode::Footer,
+        None,
+        MouseStateHandle::default(),
+    );
+
+    assert_eq!(
+        view.collect_models_by_category()
+            .get(PRIMARY_AGENT_CATEGORY),
+        Some(&vec![("gpt-5-4-xhigh".to_string(), false)])
+    );
+}
+
+#[test]
 fn show_all_agent_rows_is_independent_of_details_expanded() {
     App::test((), |mut app| async move {
         initialize_test_app(&mut app);

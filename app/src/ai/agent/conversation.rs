@@ -90,22 +90,33 @@ impl TodoStatus {
     }
 }
 
+fn visible_model_usage_client_id(usage: &stream_finished::ModelTokenUsage) -> Option<String> {
+    if usage.client_model_id.is_empty() {
+        None
+    } else {
+        Some(usage.client_model_id.clone())
+    }
+}
+
 fn footer_model_token_usage(
     usage_metadata: &stream_finished::ConversationUsageMetadata,
     llm_preferences: &LLMPreferences,
 ) -> Vec<ModelTokenUsage> {
-    // warp + byok rows merge on their server-known model id. Custom endpoint
-    // rows live in a separate bucket keyed by their upstream `config_key` so
-    // they never collide with a warp/byok row that happens to share the same
-    // resolved alias. The `config_key` itself is not retained on
-    // `ModelTokenUsage`; it is translated to an alias up front and only the
-    // alias flows downstream (display + shared-session replay).
+    // Warp + BYOK rows merge on their public client model ID, falling back to
+    // the readable map key from older servers. Custom endpoint rows live in a
+    // separate bucket keyed by their upstream `config_key` so they never
+    // collide with a Warp/BYOK row that happens to share the same resolved
+    // alias. The `config_key` itself is not retained on `ModelTokenUsage`; it
+    // is translated to an alias up front and only the alias flows downstream.
     let mut standard_usage: HashMap<String, ModelTokenUsage> = HashMap::new();
     for (model_id, usage) in &usage_metadata.warp_token_usage {
+        let client_model_id = visible_model_usage_client_id(usage);
+        let identity = client_model_id.as_deref().unwrap_or(model_id).to_string();
         let entry = standard_usage
-            .entry(model_id.clone())
+            .entry(identity)
             .or_insert_with(|| ModelTokenUsage {
                 model_id: model_id.clone(),
+                client_model_id,
                 ..Default::default()
             });
         entry.warp_tokens += usage.total_tokens;
@@ -118,10 +129,13 @@ fn footer_model_token_usage(
         }
     }
     for (model_id, usage) in &usage_metadata.byok_token_usage {
+        let client_model_id = visible_model_usage_client_id(usage);
+        let identity = client_model_id.as_deref().unwrap_or(model_id).to_string();
         let entry = standard_usage
-            .entry(model_id.clone())
+            .entry(identity)
             .or_insert_with(|| ModelTokenUsage {
                 model_id: model_id.clone(),
+                client_model_id,
                 ..Default::default()
             });
         entry.byok_tokens += usage.total_tokens;

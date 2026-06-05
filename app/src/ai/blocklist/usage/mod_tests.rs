@@ -91,7 +91,8 @@ fn long_context_usage_matches_gpt54_xhigh_public_id_despite_different_names() {
     active_model.id = "gpt-5-4-xhigh".into();
     active_model.display_name = "gpt-5.4 (xhigh)".to_string();
     let model_usage = vec![ModelTokenUsage {
-        model_id: "gpt-5-4-xhigh".to_string(),
+        model_id: "GPT-5.4 (extra high reasoning)".to_string(),
+        client_model_id: Some("gpt-5-4-xhigh".to_string()),
         byok_tokens: 1,
         long_context_used: true,
         ..Default::default()

@@ -1097,11 +1097,11 @@ pub fn token_usage_category_display_name(category: &str) -> String {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelTokenUsage {
-    /// Identifier used for both display and replay. For warp/byok rows this is the
-    /// server-known model id; for custom endpoint rows this is the resolved alias
-    /// (or fallback label) — the upstream `config_key` is translated into this
-    /// label once at ingestion time and is not retained separately.
+    /// Readable server map key used for display fallback and replay.
     pub model_id: String,
+    /// Stable public model ID used for visible Warp/BYOK model identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_model_id: Option<String>,
     /// Alias for backward compat: old persisted data used `total_tokens` for warp usage.
     #[serde(default, alias = "total_tokens")]
     pub warp_tokens: u32,
@@ -1121,6 +1121,10 @@ pub struct ModelTokenUsage {
 }
 
 impl ModelTokenUsage {
+    /// Returns the stable public model ID or the legacy readable key.
+    pub fn client_model_id_or_model_id(&self) -> &str {
+        self.client_model_id.as_deref().unwrap_or(&self.model_id)
+    }
     #[allow(deprecated)]
     fn to_proto_usage(
         &self,
@@ -1140,6 +1144,7 @@ impl ModelTokenUsage {
                     .map(|(cat, tokens)| (cat.clone(), *tokens))
                     .collect(),
                 long_context_used: self.long_context_used,
+                client_model_id: self.client_model_id.clone().unwrap_or_default(),
             },
         ))
     }
@@ -1169,6 +1174,7 @@ impl ModelTokenUsage {
                     .map(|(cat, tokens)| (cat.clone(), *tokens))
                     .collect(),
                 long_context_used: false,
+                client_model_id: String::new(),
             },
         ))
     }
@@ -1188,6 +1194,7 @@ impl ModelTokenUsage {
                     acc
                 }),
             long_context_used: self.long_context_used,
+            client_model_id: self.client_model_id.clone().unwrap_or_default(),
         }
     }
 }

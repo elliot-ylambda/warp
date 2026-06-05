@@ -128,6 +128,7 @@ fn custom_endpoint_usage_metadata(
                 total_tokens,
                 token_usage_by_category: HashMap::from([(category, total_tokens)]),
                 long_context_used: false,
+                client_model_id: String::new(),
             },
         )]),
     }
@@ -145,12 +146,13 @@ fn visible_model_usage_metadata(
         token_usage: vec![],
         tool_usage_metadata: None,
         warp_token_usage: HashMap::from([(
-            "gpt-5-4-xhigh".to_string(),
+            "GPT-5.4 (extra high reasoning)".to_string(),
             api::response_event::stream_finished::ModelTokenUsage {
-                model_id: "gpt-5-4-xhigh".to_string(),
+                model_id: String::new(),
                 total_tokens: 4,
                 token_usage_by_category: HashMap::new(),
                 long_context_used,
+                client_model_id: "gpt-5-4-xhigh".to_string(),
             },
         )]),
         byok_token_usage: HashMap::new(),
@@ -316,6 +318,36 @@ fn update_cost_and_usage_resolves_custom_endpoint_alias_for_footer_usage() {
 }
 
 #[test]
+fn update_cost_and_usage_falls_back_to_legacy_readable_model_key() {
+    App::test((), |mut app| async move {
+        initialize_custom_endpoint_usage_test_app(&mut app);
+        app.add_singleton_model(LLMPreferences::new);
+
+        let mut usage_metadata = visible_model_usage_metadata(true);
+        usage_metadata
+            .warp_token_usage
+            .get_mut("GPT-5.4 (extra high reasoning)")
+            .unwrap()
+            .client_model_id
+            .clear();
+
+        let mut conversation = AIConversation::new(false, false);
+        app.read(|ctx| {
+            conversation
+                .update_cost_and_usage_for_request(None, vec![], Some(usage_metadata), false, ctx)
+                .expect("legacy visible model usage should update");
+        });
+
+        assert_eq!(
+            conversation.token_usage()[0].model_id,
+            "GPT-5.4 (extra high reasoning)"
+        );
+        assert!(conversation.token_usage()[0].client_model_id.is_none());
+        assert!(conversation.token_usage()[0].long_context_used);
+    });
+}
+
+#[test]
 fn update_cost_and_usage_uses_fallback_label_for_unknown_custom_endpoint() {
     App::test((), |mut app| async move {
         initialize_custom_endpoint_usage_test_app(&mut app);
@@ -369,7 +401,14 @@ fn update_cost_and_usage_ingests_stable_public_model_id_with_long_context_usage(
                 .expect("visible model usage should update");
         });
 
-        assert_eq!(conversation.token_usage()[0].model_id, "gpt-5-4-xhigh");
+        assert_eq!(
+            conversation.token_usage()[0].model_id,
+            "GPT-5.4 (extra high reasoning)"
+        );
+        assert_eq!(
+            conversation.token_usage()[0].client_model_id.as_deref(),
+            Some("gpt-5-4-xhigh")
+        );
         assert!(conversation.token_usage()[0].long_context_used);
     });
 }
@@ -407,12 +446,13 @@ fn footer_model_token_usage_merges_visible_model_long_context_usage_with_or() {
 
         let mut usage_metadata = visible_model_usage_metadata(false);
         usage_metadata.byok_token_usage.insert(
-            "gpt-5-4-xhigh".to_string(),
+            "GPT-5.4 (extra high reasoning)".to_string(),
             api::response_event::stream_finished::ModelTokenUsage {
-                model_id: "gpt-5-4-xhigh".to_string(),
+                model_id: String::new(),
                 total_tokens: 6,
                 token_usage_by_category: HashMap::new(),
                 long_context_used: true,
+                client_model_id: "gpt-5-4-xhigh".to_string(),
             },
         );
 
@@ -420,6 +460,11 @@ fn footer_model_token_usage_merges_visible_model_long_context_usage_with_or() {
             app.read(|ctx| footer_model_token_usage(&usage_metadata, LLMPreferences::as_ref(ctx)));
 
         assert_eq!(model_usage.len(), 1);
+        assert_eq!(model_usage[0].model_id, "GPT-5.4 (extra high reasoning)");
+        assert_eq!(
+            model_usage[0].client_model_id.as_deref(),
+            Some("gpt-5-4-xhigh")
+        );
         assert!(model_usage[0].long_context_used);
     });
 }
@@ -461,6 +506,7 @@ fn footer_model_token_usage_keeps_custom_endpoint_usage_distinct_from_same_label
                     total_tokens: 4,
                     token_usage_by_category: HashMap::from([(category.clone(), 4)]),
                     long_context_used: true,
+                    client_model_id: String::new(),
                 },
             )]),
             custom_endpoint_token_usage: HashMap::from([(
@@ -470,6 +516,7 @@ fn footer_model_token_usage_keeps_custom_endpoint_usage_distinct_from_same_label
                     total_tokens: 6,
                     token_usage_by_category: HashMap::from([(category.clone(), 6)]),
                     long_context_used: true,
+                    client_model_id: String::new(),
                 },
             )]),
         };
@@ -529,6 +576,7 @@ fn footer_model_token_usage_preserves_unresolved_custom_endpoint_usage_with_fall
                     total_tokens: 9,
                     token_usage_by_category: HashMap::from([(category.clone(), 9)]),
                     long_context_used: true,
+                    client_model_id: String::new(),
                 },
             )]),
         };

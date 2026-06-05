@@ -301,6 +301,7 @@ fn model_token_usage_replays_custom_endpoint_usage_by_model_id() {
     assert_eq!(proto.total_tokens, 6);
     assert_eq!(proto.token_usage_by_category.get("primary_agent"), Some(&6));
     assert!(!proto.long_context_used);
+    assert!(proto.client_model_id.is_empty());
 }
 
 #[allow(deprecated)]
@@ -325,7 +326,8 @@ fn model_token_usage_legacy_payload_defaults_long_context_used_to_false() {
 #[test]
 fn model_token_usage_roundtrips_long_context_used() {
     let usage = ModelTokenUsage {
-        model_id: "gpt-5-4-xhigh".to_string(),
+        model_id: "GPT-5.4 (extra high reasoning)".to_string(),
+        client_model_id: Some("gpt-5-4-xhigh".to_string()),
         long_context_used: true,
         ..Default::default()
     };
@@ -333,7 +335,11 @@ fn model_token_usage_roundtrips_long_context_used() {
     let json = serde_json::to_string(&usage).expect("serialize");
     let roundtripped: ModelTokenUsage = serde_json::from_str(&json).expect("deserialize");
 
-    assert_eq!(roundtripped.model_id, "gpt-5-4-xhigh");
+    assert_eq!(roundtripped.model_id, "GPT-5.4 (extra high reasoning)");
+    assert_eq!(
+        roundtripped.client_model_id.as_deref(),
+        Some("gpt-5-4-xhigh")
+    );
     assert!(roundtripped.long_context_used);
 }
 
@@ -341,7 +347,8 @@ fn model_token_usage_roundtrips_long_context_used() {
 #[test]
 fn model_token_usage_replays_long_context_used_for_visible_models() {
     let usage = ModelTokenUsage {
-        model_id: "gpt-5-4-xhigh".to_string(),
+        model_id: "GPT-5.4 (extra high reasoning)".to_string(),
+        client_model_id: Some("gpt-5-4-xhigh".to_string()),
         warp_tokens: 4,
         long_context_used: true,
         ..Default::default()
@@ -351,7 +358,8 @@ fn model_token_usage_replays_long_context_used_for_visible_models() {
         .to_proto_warp_usage()
         .expect("warp usage should serialize for replay");
 
-    assert_eq!(key, "gpt-5-4-xhigh");
-    assert_eq!(proto.model_id, "gpt-5-4-xhigh");
+    assert_eq!(key, "GPT-5.4 (extra high reasoning)");
+    assert_eq!(proto.model_id, "GPT-5.4 (extra high reasoning)");
     assert!(proto.long_context_used);
+    assert_eq!(proto.client_model_id, "gpt-5-4-xhigh");
 }

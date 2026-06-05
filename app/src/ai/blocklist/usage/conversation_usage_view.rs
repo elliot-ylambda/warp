@@ -229,7 +229,7 @@ impl ConversationUsageView {
                     entries_by_category
                         .entry(category.clone())
                         .or_default()
-                        .push((model.model_id.clone(), false));
+                        .push((model.client_model_id_or_model_id().to_string(), false));
                 }
             }
             for (category, &tokens) in &model.byok_token_usage_by_category {
@@ -237,7 +237,7 @@ impl ConversationUsageView {
                     entries_by_category
                         .entry(category.clone())
                         .or_default()
-                        .push((model.model_id.clone(), true));
+                        .push((model.client_model_id_or_model_id().to_string(), true));
                 }
             }
             for (category, &tokens) in &model.custom_endpoint_token_usage_by_category {
@@ -257,13 +257,13 @@ impl ConversationUsageView {
                     entries_by_category
                         .entry(PRIMARY_AGENT_CATEGORY.to_string())
                         .or_default()
-                        .push((model.model_id.clone(), false));
+                        .push((model.client_model_id_or_model_id().to_string(), false));
                 }
                 if model.byok_tokens > 0 {
                     entries_by_category
                         .entry(PRIMARY_AGENT_CATEGORY.to_string())
                         .or_default()
-                        .push((model.model_id.clone(), true));
+                        .push((model.client_model_id_or_model_id().to_string(), true));
                 }
                 if model.custom_endpoint_tokens > 0 {
                     entries_by_category
