@@ -40,11 +40,62 @@ pub(crate) const DEFAULT_COMMENT_MAX_WIDTH: f32 = 750.0;
 /// internally instead of growing further.
 pub(crate) const MAX_COMMENT_HEIGHT: f32 = 200.0;
 
-/// Fixed vertical chrome around the inner markdown editor: the editor area's top/bottom padding
+/// Fixed vertical chrome around the inner comment editor: the editor area's top/bottom padding
 /// (8 + 4), the footer's vertical padding and top border (8 + 1), the footer button row
-/// (`ButtonSize::Small` is 24px tall), and the outer container's top/bottom border (2). Slightly
-/// generous so the reserved inline block is never shorter than the painted composer.
-const COMPOSER_CHROME_HEIGHT: f32 = 48.0;
+/// (`ButtonSize::Small` is 24px tall), and the outer container's top/bottom border (2).
+/// Slightly generous so the reserved inline block is never shorter than the painted shell.
+pub(crate) const COMMENT_CHROME_HEIGHT: f32 = 48.0;
+
+pub(crate) fn inline_comment_background(appearance: &Appearance) -> ColorU {
+    blended_colors::neutral_2(appearance.theme())
+}
+
+pub(crate) fn inline_comment_border_color(appearance: &Appearance) -> ColorU {
+    blended_colors::neutral_4(appearance.theme())
+}
+
+pub(crate) fn render_inline_comment_shell(
+    body: Box<dyn Element>,
+    footer_row: Box<dyn Element>,
+    max_height: Option<f32>,
+    appearance: &Appearance,
+) -> Box<dyn Element> {
+    let background = inline_comment_background(appearance);
+    let border_color = inline_comment_border_color(appearance);
+
+    let body = Container::new(Clipped::new(body).finish())
+        .with_padding_bottom(4.)
+        .with_padding_top(8.)
+        .with_horizontal_padding(12.)
+        .finish();
+    let body = if max_height.is_some() {
+        Shrinkable::new(1., body).finish()
+    } else {
+        body
+    };
+
+    let content = Flex::column()
+        .with_child(body)
+        .with_child(
+            Container::new(footer_row)
+                .with_vertical_padding(4.)
+                .with_horizontal_padding(12.)
+                .with_border(Border::top(1.).with_border_fill(border_color))
+                .finish(),
+        )
+        .finish();
+
+    let mut constrained = ConstrainedBox::new(content).with_max_width(DEFAULT_COMMENT_MAX_WIDTH);
+    if let Some(max_height) = max_height {
+        constrained = constrained.with_max_height(max_height);
+    }
+
+    Container::new(constrained.finish())
+        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
+        .with_background_color(background)
+        .with_border(Border::all(1.).with_border_fill(border_color))
+        .finish()
+}
 
 #[derive(Debug)]
 pub enum CommentEditorEvent {
@@ -173,9 +224,10 @@ impl CommentEditor {
     /// content height is current as soon as the inner render state finishes laying out, so a host
     /// observing [`Self::inner_render_state`] can keep the reserved block height in sync as the
     /// draft grows or shrinks.
+    #[allow(unused)]
     pub fn inline_height(&self, app: &AppContext) -> Pixels {
         let content_height = self.inner_render_state(app).as_ref(app).height().as_f32();
-        Pixels::new((content_height + COMPOSER_CHROME_HEIGHT).min(MAX_COMMENT_HEIGHT))
+        Pixels::new((content_height + COMMENT_CHROME_HEIGHT).min(MAX_COMMENT_HEIGHT))
     }
 
     #[cfg_attr(not(feature = "local_fs"), allow(unused))]
@@ -387,7 +439,13 @@ impl CommentEditor {
             // The `reset_with_markdown` call below is a band-aid fix.
             editor.reset_with_markdown("", ctx);
         });
+        self.comment_id = None;
         self.line = Some(line.clone());
+        self.show_remove_button = false;
+        self.is_imported_comment = false;
+        self.save_button.update(ctx, |button, ctx| {
+            button.set_label("Comment", ctx);
+        });
         self.update_save_button_state(ctx);
     }
 
@@ -450,7 +508,6 @@ impl CommentEditor {
             comment_text: comment_text.clone(),
             line: self.line.clone(),
         });
-        self.reset(ctx);
         ctx.emit(CommentEditorEvent::CloseEditor);
     }
 
@@ -535,45 +592,16 @@ impl View for CommentEditor {
 
     fn render(&self, ctx: &AppContext) -> Box<dyn Element> {
         let appearance = Appearance::handle(ctx).as_ref(ctx);
-        let theme = appearance.theme();
-        let background = blended_colors::neutral_2(theme);
-        let border_color = blended_colors::neutral_4(theme);
+        let background = inline_comment_background(appearance);
 
         let footer_row = self.render_footer_row(appearance, background);
 
-        Container::new(
-            ConstrainedBox::new(
-                Flex::column()
-                    .with_child(
-                        Shrinkable::new(
-                            1.,
-                            Container::new(
-                                Clipped::new(ChildView::new(&self.editor).finish()).finish(),
-                            )
-                            .with_padding_bottom(4.)
-                            .with_padding_top(8.)
-                            .with_horizontal_padding(12.)
-                            .finish(),
-                        )
-                        .finish(),
-                    )
-                    .with_child(
-                        Container::new(footer_row)
-                            .with_vertical_padding(4.)
-                            .with_horizontal_padding(4.)
-                            .with_border(Border::top(1.).with_border_fill(border_color))
-                            .finish(),
-                    )
-                    .finish(),
-            )
-            .with_max_height(MAX_COMMENT_HEIGHT)
-            .with_max_width(DEFAULT_COMMENT_MAX_WIDTH)
-            .finish(),
+        render_inline_comment_shell(
+            ChildView::new(&self.editor).finish(),
+            footer_row,
+            Some(MAX_COMMENT_HEIGHT),
+            appearance,
         )
-        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
-        .with_background_color(background)
-        .with_border(Border::all(1.).with_border_fill(border_color))
-        .finish()
     }
 
     fn on_focus(&mut self, focus_ctx: &FocusContext, ctx: &mut ViewContext<Self>) {

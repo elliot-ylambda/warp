@@ -13,7 +13,7 @@ use num_traits::SaturatingSub;
 use pathfinder_geometry::vector::vec2f;
 use settings::Setting as _;
 use string_offset::CharOffset;
-use vec1::{vec1, Vec1};
+use vec1::{Vec1, vec1};
 use vim::vim::{Direction, InsertPosition, VimMode, VimModel, VimState, VimSubscriber};
 use warp_core::platform::SessionPlatform;
 use warp_editor::content::buffer::{
@@ -29,10 +29,10 @@ use warp_editor::render::element::{
     DisplayOptions, DisplayStateHandle, RichTextElement, VerticalExpansionBehavior,
 };
 use warp_editor::render::model::{
-    AutoScrollMode, BlockSpacing, CommentBlock, Decoration, ExpansionType, LineCount,
-    ParagraphStyles, RichTextStyles, CODE_EDITOR_HIDDEN_SECTION_EXPANSION_LINES,
+    AutoScrollMode, BlockSpacing, CODE_EDITOR_HIDDEN_SECTION_EXPANSION_LINES, CommentBlock,
+    Decoration, ExpansionType, LineCount, ParagraphStyles, RichTextStyles,
 };
-use warp_editor::search::{SearchEvent, Searcher, MATCH_FILL, SELECTED_MATCH_FILL};
+use warp_editor::search::{MATCH_FILL, SELECTED_MATCH_FILL, SearchEvent, Searcher};
 use warp_util::content_version::ContentVersion;
 use warp_util::standardized_path::StandardizedPath;
 use warpui::elements::new_scrollable::{
@@ -55,6 +55,7 @@ use warpui::{
 };
 
 use crate::appearance::Appearance;
+use crate::code::editor::EditorReviewComment;
 use crate::code::editor::comment_editor::{
     CommentEditor, CommentEditorEvent, DEFAULT_COMMENT_MAX_WIDTH,
 };
@@ -64,9 +65,7 @@ use crate::code::editor::element::{
     AddAsContextButton, CommentButton, EditorWrapper, EditorWrapperStateHandle, GutterHoverTarget,
     GutterRange, InnerEditor, LineNumberConfig, RevertHunkButton,
 };
-use crate::code::editor::embedded_comment::{
-    LaidOutEmbeddedCommentSpace, LaidOutInlineSavedComment,
-};
+use crate::code::editor::embedded_comment::LaidOutInlineSavedComment;
 use crate::code::editor::find::view::{CodeEditorFind as Find, Event as FindViewEvent};
 use crate::code::editor::goto_line::view::{Event as GoToLineEvent, GoToLineView};
 use crate::code::editor::inline_comment_view::{InlineCommentView, InlineCommentViewEvent};
@@ -76,7 +75,6 @@ use crate::code::editor::model::{
 };
 use crate::code::editor::nav_bar::{NavBar, NavBarBehavior, NavBarEvent};
 use crate::code::editor::scroll::{ScrollPosition, ScrollTrigger, ScrollWheelBehavior};
-use crate::code::editor::EditorReviewComment;
 use crate::code::{
     DiffResult, NoopCommentEditorProvider, NoopFindReferencesCardProvider,
     ShowCommentEditorProvider, ShowFindReferencesCardProvider,
@@ -89,8 +87,8 @@ use crate::settings::{AppEditorSettings, CodeEditorLineNumberMode, FontSettings}
 use crate::view_components::find::FindDirection;
 
 mod actions;
-pub use actions::init;
 pub(super) use actions::CodeEditorViewAction;
+pub use actions::init;
 
 #[cfg(feature = "integration_tests")]
 mod view_integration;
@@ -1139,13 +1137,10 @@ impl CodeEditorView {
     }
 
     /// Reconcile the full set of inline comment blocks on the per-view render state with the current
-    /// state: one read-only card per saved [`InlineCommentView`] plus, when open, the active
-    /// composer. Under the `EmbeddedCodeReviewComments` flag each block occupies real vertical space
-    /// at its line via the per-view comment-block primitive; when the flag is off all inline blocks
-    /// are removed and the floating overlay in `render` is used as the fallback instead.
-    ///
-    /// When the composer is open on a line that also has a saved card, the card is skipped so the
-    /// composer REPLACES it (per the locked design decision) rather than stacking with it.
+    /// state: one [`InlineCommentView`] per saved comment plus, when open, one pending draft view.
+    /// Under the `EmbeddedCodeReviewComments` flag each block occupies real vertical space at its
+    /// line via the per-view comment-block primitive; when the flag is off all inline blocks are
+    /// removed and the floating overlay in `render` is used as the fallback instead.
     ///
     /// This only ever runs in `&mut self`, never in `render`, so the hosted views are never created
     /// during rendering (they are reconciled in `set_comment_locations`).
@@ -1157,32 +1152,15 @@ impl CodeEditorView {
             return;
         }
 
-        let composer_line = match &self
-            .model
-            .as_ref(ctx)
-            .comments()
-            .as_ref(ctx)
-            .pending_comment
-        {
-            PendingComment::Open { line } => Some(line.clone()),
-            PendingComment::Closed => None,
-        };
-
         let mut blocks: Vec<CommentBlock> = Vec::new();
 
-        // One inline card per reconciled saved comment, skipping any whose line the composer
-        // currently occupies (the composer replaces that card).
+        // One stable inline view per reconciled saved comment. The view itself switches between
+        // saved/editing modes, so it is never replaced by the singleton composer in embedded mode.
         for view in self.inline_comments.values() {
             let (line, height) = {
                 let view_ref = view.as_ref(ctx);
                 (view_ref.line().clone(), view_ref.inline_height(ctx))
             };
-            if composer_line
-                .as_ref()
-                .is_some_and(|composer_line| composer_line.is_same_line(&line))
-            {
-                continue;
-            }
             let size = vec2f(DEFAULT_COMMENT_MAX_WIDTH, height.as_f32());
             let item = Arc::new(LaidOutInlineSavedComment::new(
                 view.id(),
@@ -1195,23 +1173,18 @@ impl CodeEditorView {
             ));
         }
 
-        // The active composer (above any card on its line, which is skipped above).
-        if let Some(line) = composer_line {
-            let height = self.active_comment_editor.as_ref(ctx).inline_height(ctx);
-            let size = vec2f(DEFAULT_COMMENT_MAX_WIDTH, height.as_f32());
-            let item = Arc::new(LaidOutEmbeddedCommentSpace::new(
-                self.active_comment_editor.id(),
-                self.window_id,
-                size,
-            ));
-            blocks.push(CommentBlock::new(
-                line.into_inline_comment_render_line_location(),
-                item,
-            ));
-        }
-
         self.model.update(ctx, |model, ctx| {
             model.set_inline_comment_blocks(blocks, ctx);
+        });
+    }
+
+    fn wire_inline_comment_view(view: &ViewHandle<InlineCommentView>, ctx: &mut ViewContext<Self>) {
+        ctx.subscribe_to_view(view, |me, _, event, ctx| {
+            me.handle_inline_comment_event(event, ctx);
+        });
+        let inner_render_state = view.as_ref(ctx).inner_render_state(ctx);
+        ctx.observe(&inner_render_state, |me, _, ctx| {
+            me.sync_inline_comment_blocks(ctx);
         });
     }
 
@@ -1258,7 +1231,7 @@ impl CodeEditorView {
         comment_text: &str,
         line: &EditorLineLocation,
         ctx: &mut ViewContext<Self>,
-    ) {
+    ) -> EditorReviewComment {
         let line_content = self.model.as_ref(ctx).get_diff_content_for_line(line, ctx);
 
         let review_comment = match id {
@@ -1280,9 +1253,10 @@ impl CodeEditorView {
         });
 
         ctx.emit(CodeEditorEvent::CommentSaved {
-            comment: review_comment,
+            comment: review_comment.clone(),
         });
         ctx.notify();
+        review_comment
     }
 
     /// Update all comment locations in this editor.
@@ -1321,24 +1295,20 @@ impl CodeEditorView {
                 } else {
                     let view =
                         ctx.add_typed_action_view(|ctx| InlineCommentView::new(comment, ctx));
-                    // Route the card's edit affordance back into the inline composer.
-                    ctx.subscribe_to_view(&view, |me, _, event, ctx| {
-                        me.handle_inline_comment_event(event, ctx);
-                    });
-                    // Re-measure the card's reserved height whenever its body re-lays out (for
-                    // example after a width change re-wraps the body), so the block reflows.
-                    let inner_render_state = view.as_ref(ctx).inner_render_state(ctx);
-                    ctx.observe(&inner_render_state, |me, _, ctx| {
-                        me.sync_inline_comment_blocks(ctx);
-                    });
+                    Self::wire_inline_comment_view(&view, ctx);
                     view
                 };
                 new_inline_comments.insert(id, view);
             }
         }
 
-        // Any handles still left in `self.inline_comments` correspond to removed comments and are
-        // dropped here.
+        // Preserve unsaved draft views; any other handles still left correspond to removed saved
+        // comments and are dropped here.
+        for (id, view) in std::mem::take(&mut self.inline_comments) {
+            if view.as_ref(ctx).is_new_draft() {
+                new_inline_comments.insert(id, view);
+            }
+        }
         self.inline_comments = new_inline_comments;
         // Reconcile the rendered inline blocks (saved cards + composer) against the new set.
         self.sync_inline_comment_blocks(ctx);
@@ -1351,16 +1321,50 @@ impl CodeEditorView {
         ctx: &mut ViewContext<Self>,
     ) {
         match event {
-            InlineCommentViewEvent::RequestEdit {
-                id,
-                line,
-                comment_text,
-                origin,
-            } => {
-                self.open_existing_comment(id, line, comment_text, origin, ctx);
+            InlineCommentViewEvent::RequestEdit { id } => {
+                let Some(view) = self.inline_comments.get(id).cloned() else {
+                    return;
+                };
+                view.update(ctx, |view, ctx| {
+                    view.begin_editing(ctx);
+                });
+                self.sync_inline_comment_blocks(ctx);
+                ctx.emit(CodeEditorEvent::CommentEditorOpened);
+                ctx.notify();
             }
             InlineCommentViewEvent::RequestRemove { id } => {
                 ctx.emit(CodeEditorEvent::DeleteComment { id: *id });
+            }
+            InlineCommentViewEvent::CommentSaved {
+                id,
+                line,
+                comment_text,
+            } => {
+                let review_comment = self.save_comment(Some(*id), comment_text, line, ctx);
+                if let Some(view) = self.inline_comments.get(&review_comment.id).cloned() {
+                    view.update(ctx, |view, ctx| {
+                        view.complete_save(review_comment.clone(), ctx);
+                    });
+                }
+                self.sync_inline_comment_blocks(ctx);
+                ctx.notify();
+            }
+            InlineCommentViewEvent::Cancelled { id } => {
+                if let Some(view) = self.inline_comments.get(id).cloned() {
+                    if view.as_ref(ctx).is_new_draft() {
+                        self.inline_comments.remove(id);
+                    } else {
+                        view.update(ctx, |view, ctx| {
+                            view.cancel_editing(ctx);
+                        });
+                    }
+                }
+                self.sync_inline_comment_blocks(ctx);
+                ctx.notify();
+            }
+            InlineCommentViewEvent::ContentChanged => {
+                self.sync_inline_comment_blocks(ctx);
+                ctx.notify();
             }
         }
     }
@@ -2306,6 +2310,20 @@ impl CodeEditorView {
             );
             return;
         }
+        if FeatureFlag::EmbeddedCodeReviewComments.is_enabled() {
+            let Some(view) = self.inline_comments.get(id).cloned() else {
+                log::warn!(
+                    "open_existing_comment: no inline comment view found for id {:?}",
+                    id
+                );
+                return;
+            };
+            view.update(ctx, |view, ctx| view.begin_editing(ctx));
+            self.sync_inline_comment_blocks(ctx);
+            ctx.emit(CodeEditorEvent::CommentEditorOpened);
+            ctx.notify();
+            return;
+        }
 
         self.active_comment_editor
             .update(ctx, |comment_editor, ctx| {
@@ -2437,14 +2455,21 @@ impl View for CodeEditorView {
             self.find_references_save_position_id.clone(),
         );
 
-        let pending_comment = &self
-            .model
-            .as_ref(app)
-            .comments()
-            .as_ref(app)
-            .pending_comment;
-        // Check if there's an open comment in the model and set the comment box
-        if let PendingComment::Open { line, .. } = pending_comment {
+        let embedded_comments_enabled = FeatureFlag::EmbeddedCodeReviewComments.is_enabled();
+        let pending_comment = if embedded_comments_enabled {
+            None
+        } else {
+            Some(
+                &self
+                    .model
+                    .as_ref(app)
+                    .comments()
+                    .as_ref(app)
+                    .pending_comment,
+            )
+        };
+        // Check if there's an open legacy floating comment in the model and set the comment box.
+        if let Some(PendingComment::Open { line, .. }) = pending_comment {
             code_editor.set_comment_box(line.clone(), app);
         }
 
@@ -2453,8 +2478,8 @@ impl View for CodeEditorView {
             let render_state_ref = render_state.as_ref(app);
             let softwrap_point = render_state_ref.offset_to_softwrap_point(*offset);
             let line_number = LineCount::from(softwrap_point.row() as usize + 1); // Convert 0-indexed to 1-indexed
-                                                                                  // Create a simple EditorLineLocation::Current with the line number
-                                                                                  // We don't have hunk range info here, so use a single-line range
+            // Create a simple EditorLineLocation::Current with the line number
+            // We don't have hunk range info here, so use a single-line range
             let anchor_line = EditorLineLocation::Current {
                 line_number,
                 line_range: line_number..line_number + LineCount::from(1),
@@ -2512,7 +2537,7 @@ impl View for CodeEditorView {
 
         if !FeatureFlag::EmbeddedCodeReviewComments.is_enabled() {
             // Render the open comment editor.
-            if let PendingComment::Open { line, .. } = pending_comment {
+            if let Some(PendingComment::Open { line, .. }) = pending_comment {
                 let render_state_ref = render_state.as_ref(app);
                 let vertical_offset = render_state_ref
                     .vertical_offset_at_render_location(line.clone().into_render_line_location())

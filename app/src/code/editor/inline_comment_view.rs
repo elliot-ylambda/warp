@@ -1,13 +1,13 @@
 use std::cell::RefCell;
 
-use chrono::Local;
+use chrono::{DateTime, Local};
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::Vector2F;
 use warp_core::ui::theme::Fill;
 use warp_editor::render::model::RenderState;
 use warpui::elements::{
-    Border, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Flex,
-    MainAxisAlignment, MainAxisSize, ParentElement, Radius, Shrinkable, Text,
+    ChildView, ConstrainedBox, CrossAxisAlignment, Flex, MainAxisAlignment, MainAxisSize,
+    ParentElement, Shrinkable, Text,
 };
 use warpui::text_layout::ClipConfig;
 use warpui::units::Pixels;
@@ -19,74 +19,117 @@ use warpui::{
 use crate::appearance::Appearance;
 use crate::code::editor::EditorReviewComment;
 use crate::code::editor::comment_editor::{
-    DEFAULT_COMMENT_MAX_WIDTH, create_readonly_comment_markdown_editor,
+    COMMENT_CHROME_HEIGHT, create_editable_comment_markdown_editor, inline_comment_background,
+    render_inline_comment_shell,
 };
 use crate::code::editor::line::EditorLineLocation;
 use crate::code_review::comments::{CommentId, CommentOrigin};
-use crate::notebooks::editor::view::RichTextEditorView;
-use crate::ui_components::blended_colors;
+use crate::editor::InteractionState;
+use crate::notebooks::editor::view::{EditorViewEvent, RichTextEditorView};
 use crate::ui_components::icons::Icon;
 use crate::util::time_format::human_readable_approx_duration;
 use crate::view_components::action_button::{
-    ActionButton, ButtonSize, DangerNakedTheme, NakedTheme,
+    ActionButton, ButtonSize, DangerNakedTheme, NakedTheme, PrimaryTheme,
 };
 
-/// Fixed vertical chrome around the inner read-only body editor: the editor area's top/bottom
-/// padding (8 + 4), the footer's vertical padding and top border (8 + 1), the footer button row
-/// (`ButtonSize::Small` is 24px tall), and the outer container's top/bottom border (2). Slightly
-/// generous so the reserved inline block is never shorter than the painted card.
-const SAVED_CARD_CHROME_HEIGHT: f32 = 48.0;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InlineCommentMode {
+    Saved,
+    NewDraft,
+    EditingExisting,
+}
 
 #[derive(Debug)]
 pub enum InlineCommentViewAction {
-    /// The card's edit affordance was activated; open the inline composer for this comment.
     Edit,
-    /// The card's remove affordance was activated; delete this comment.
     Remove,
+    Save,
+    Cancel,
 }
 
 #[derive(Debug)]
 pub enum InlineCommentViewEvent {
-    /// The user asked to edit this saved comment inline (via the card's edit affordance). The
-    /// hosting [`CodeEditorView`] reopens it as the prefilled inline composer.
     RequestEdit {
+        id: CommentId,
+    },
+    RequestRemove {
+        id: CommentId,
+    },
+    CommentSaved {
         id: CommentId,
         line: EditorLineLocation,
         comment_text: String,
-        origin: CommentOrigin,
     },
-    /// The user asked to remove this saved comment inline.
-    RequestRemove { id: CommentId },
+    Cancelled {
+        id: CommentId,
+    },
+    ContentChanged,
 }
 
-/// A per-comment read-only view of a saved code-review comment, hosted inline in the diff editor.
+/// A per-comment inline code-review comment view hosted in the diff editor.
 ///
-/// It owns the full [`EditorReviewComment`] (the editor's slice of the `ReviewCommentBatch` source
-/// of truth) plus a read-only markdown body editor. The owning [`CodeEditorView`] keeps a
-/// `HashMap<CommentId, ViewHandle<InlineCommentView>>` and reconciles it from
-/// `set_comment_locations`: the handle is reused (entity id preserved) and refreshed in place via
-/// [`Self::update_source`] when a comment's content changes, so the inline view never thrashes.
-///
-/// Per the locked design decision the card shows the comment body plus a composer-style footer with
-/// lightweight metadata (relative time + an imported-from-GitHub indicator) and edit/remove
-/// affordances — but NOT the redundant embedded diff snippet that the bottom-panel
-/// `CommentViewCard` renders (the comment already sits on its own diff line inline).
+/// The same view owns the same inner [`RichTextEditorView`] while moving between saved and editing
+/// modes, so saving an inline comment does not replace the editor subtree and cause a transient
+/// sizing mismatch.
 pub struct InlineCommentView {
-    comment: EditorReviewComment,
+    id: CommentId,
+    line: EditorLineLocation,
+    saved_content: String,
+    last_update_time: DateTime<Local>,
+    origin: CommentOrigin,
+    mode: InlineCommentMode,
     body_editor: ViewHandle<RichTextEditorView>,
     edit_button: ViewHandle<ActionButton>,
     remove_button: ViewHandle<ActionButton>,
+    save_button: ViewHandle<ActionButton>,
+    cancel_button: ViewHandle<ActionButton>,
+    save_button_disabled: bool,
     laid_out_size: RefCell<Option<Vector2F>>,
 }
 
 impl InlineCommentView {
     pub fn new(comment: EditorReviewComment, ctx: &mut ViewContext<Self>) -> Self {
-        let body_editor = create_readonly_comment_markdown_editor(
-            &comment.comment_content,
-            true, /* disable_scrolling */
-            Some(Pixels::new(DEFAULT_COMMENT_MAX_WIDTH)),
+        let body_editor =
+            create_editable_comment_markdown_editor(Some(&comment.comment_content), ctx);
+        body_editor.update(ctx, |editor, ctx| {
+            editor.set_interaction_state(InteractionState::Selectable, ctx);
+        });
+        Self::new_inner(
+            comment.id,
+            comment.line,
+            comment.comment_content,
+            comment.last_update_time,
+            comment.origin,
+            InlineCommentMode::Saved,
+            body_editor,
             ctx,
-        );
+        )
+    }
+
+    pub fn new_draft(line: EditorLineLocation, ctx: &mut ViewContext<Self>) -> Self {
+        let body_editor = create_editable_comment_markdown_editor(None, ctx);
+        Self::new_inner(
+            CommentId::new(),
+            line,
+            String::new(),
+            Local::now(),
+            CommentOrigin::default(),
+            InlineCommentMode::NewDraft,
+            body_editor,
+            ctx,
+        )
+    }
+
+    fn new_inner(
+        id: CommentId,
+        line: EditorLineLocation,
+        saved_content: String,
+        last_update_time: DateTime<Local>,
+        origin: CommentOrigin,
+        mode: InlineCommentMode,
+        body_editor: ViewHandle<RichTextEditorView>,
+        ctx: &mut ViewContext<Self>,
+    ) -> Self {
         let edit_button = ctx.add_typed_action_view(|_| {
             ActionButton::new("Edit", NakedTheme)
                 .with_size(ButtonSize::Small)
@@ -97,36 +140,130 @@ impl InlineCommentView {
                 .with_size(ButtonSize::Small)
                 .on_click(|ctx| ctx.dispatch_typed_action(InlineCommentViewAction::Remove))
         });
-        Self {
-            comment,
+        let save_button = ctx.add_typed_action_view(|_| {
+            ActionButton::new("Comment", PrimaryTheme)
+                .with_size(ButtonSize::Small)
+                .on_click(|ctx| ctx.dispatch_typed_action(InlineCommentViewAction::Save))
+        });
+        let cancel_button = ctx.add_typed_action_view(|_| {
+            ActionButton::new("Cancel", NakedTheme)
+                .with_size(ButtonSize::Small)
+                .on_click(|ctx| ctx.dispatch_typed_action(InlineCommentViewAction::Cancel))
+        });
+
+        ctx.subscribe_to_view(&body_editor, |me, _, event, ctx| {
+            me.handle_body_editor_event(event, ctx);
+        });
+
+        let mut me = Self {
+            id,
+            line,
+            saved_content,
+            last_update_time,
+            origin,
+            mode,
             body_editor,
             edit_button,
             remove_button,
+            save_button,
+            cancel_button,
+            save_button_disabled: true,
             laid_out_size: RefCell::new(None),
-        }
+        };
+        me.apply_mode(ctx);
+        me.update_save_button_state(ctx);
+        me
     }
 
-    /// Refresh this view's data in place, resetting the body editor only when the content changed.
-    /// Reusing the same handle keeps the inline block stable across batch updates.
+    /// Refresh this view's saved data in place. If the comment is not actively being edited, also
+    /// refresh the body editor so the rendered saved card matches the comment batch.
     pub fn update_source(&mut self, comment: EditorReviewComment, ctx: &mut ViewContext<Self>) {
-        if comment.comment_content != self.comment.comment_content {
+        self.id = comment.id;
+        self.line = comment.line;
+        self.last_update_time = comment.last_update_time;
+        self.origin = comment.origin;
+        if self.mode == InlineCommentMode::Saved && comment.comment_content != self.saved_content {
             self.body_editor.update(ctx, |editor, ctx| {
                 editor.model().update(ctx, |model, ctx| {
                     model.reset_with_markdown(&comment.comment_content, ctx);
                 });
             });
         }
-        self.comment = comment;
+        self.saved_content = comment.comment_content;
+        if self.mode == InlineCommentMode::Saved {
+            self.apply_mode(ctx);
+        }
         ctx.notify();
     }
 
-    pub fn line(&self) -> &EditorLineLocation {
-        &self.comment.line
+    pub fn begin_editing(&mut self, ctx: &mut ViewContext<Self>) {
+        self.mode = InlineCommentMode::EditingExisting;
+        self.body_editor.update(ctx, |editor, ctx| {
+            editor.model().update(ctx, |model, ctx| {
+                model.reset_with_markdown(&self.saved_content, ctx);
+            });
+        });
+        self.apply_mode(ctx);
+        self.update_save_button_state(ctx);
+        ctx.focus(&self.body_editor);
+        ctx.notify();
     }
 
-    /// The render state backing the inner read-only body editor. Observing it lets the host
-    /// re-measure the card's reserved inline height when its laid-out height changes (for example
-    /// after a width change re-wraps the body).
+    pub fn complete_save(&mut self, comment: EditorReviewComment, ctx: &mut ViewContext<Self>) {
+        self.id = comment.id;
+        self.line = comment.line;
+        self.saved_content = comment.comment_content;
+        self.last_update_time = comment.last_update_time;
+        self.origin = comment.origin;
+        self.mode = InlineCommentMode::Saved;
+        self.apply_mode(ctx);
+        ctx.notify();
+    }
+
+    pub fn cancel_editing(&mut self, ctx: &mut ViewContext<Self>) {
+        if self.mode == InlineCommentMode::EditingExisting {
+            self.mode = InlineCommentMode::Saved;
+            self.body_editor.update(ctx, |editor, ctx| {
+                editor.model().update(ctx, |model, ctx| {
+                    model.reset_with_markdown(&self.saved_content, ctx);
+                });
+            });
+            self.apply_mode(ctx);
+            ctx.notify();
+        }
+    }
+
+    pub fn id(&self) -> CommentId {
+        self.id
+    }
+
+    pub fn line(&self) -> &EditorLineLocation {
+        &self.line
+    }
+
+    pub fn is_editing(&self) -> bool {
+        matches!(
+            self.mode,
+            InlineCommentMode::NewDraft | InlineCommentMode::EditingExisting
+        )
+    }
+
+    pub fn is_new_draft(&self) -> bool {
+        self.mode == InlineCommentMode::NewDraft
+    }
+
+    pub fn focus_body(&self, ctx: &mut ViewContext<Self>) {
+        ctx.focus(&self.body_editor);
+    }
+
+    pub fn comment_text(&self, app: &AppContext) -> String {
+        self.body_editor
+            .as_ref(app)
+            .model()
+            .as_ref(app)
+            .markdown(app)
+    }
+
     pub fn inner_render_state(&self, app: &AppContext) -> ModelHandle<RenderState> {
         self.body_editor
             .as_ref(app)
@@ -136,12 +273,9 @@ impl InlineCommentView {
             .clone()
     }
 
-    /// The height, in pixels, this card needs to render inline at its line: the body editor's
-    /// laid-out content height plus fixed chrome. Saved cards are not height-capped (a tall comment
-    /// reserves its full height and scrolls into view with the surrounding code).
     pub fn inline_height(&self, app: &AppContext) -> Pixels {
         let content_height = self.inner_render_state(app).as_ref(app).height().as_f32();
-        Pixels::new(content_height + SAVED_CARD_CHROME_HEIGHT)
+        Pixels::new(content_height + COMMENT_CHROME_HEIGHT)
     }
 
     pub fn set_laid_out_size(&self, value: Vector2F) {
@@ -153,18 +287,11 @@ impl InlineCommentView {
         self.laid_out_size.borrow().as_ref().cloned()
     }
 
-    /// The rendered body text of the hosted read-only editor.
     #[cfg(any(test, feature = "integration_tests"))]
     pub fn rendered_body(&self, app: &AppContext) -> String {
-        self.body_editor
-            .as_ref(app)
-            .model()
-            .as_ref(app)
-            .markdown(app)
+        self.comment_text(app)
     }
 
-    /// Override the body editor's soft-wrap max width (test-only), forcing the card's body to
-    /// re-wrap. The host re-measures the card's reserved height when the body re-lays out.
     #[cfg(feature = "integration_tests")]
     pub fn set_body_wrap_width_for_test(&mut self, max_width: Pixels, ctx: &mut ViewContext<Self>) {
         self.body_editor.update(ctx, |editor, ctx| {
@@ -173,24 +300,83 @@ impl InlineCommentView {
         ctx.notify();
     }
 
-    /// Whether this saved card embeds a diff snippet. The inline card renders only the comment body
-    /// and lightweight metadata — never the redundant diff snippet the bottom-panel card shows — so
-    /// this is structurally `false`. The getter exists so a regression that started embedding a
-    /// snippet inline would surface in the integration tests.
     #[cfg(feature = "integration_tests")]
     pub fn embeds_diff_snippet_for_test(&self) -> bool {
         false
     }
 
+    fn apply_mode(&mut self, ctx: &mut ViewContext<Self>) {
+        let interaction_state = if self.is_editing() {
+            InteractionState::Editable
+        } else {
+            InteractionState::Selectable
+        };
+        self.body_editor.update(ctx, |editor, ctx| {
+            editor.set_interaction_state(interaction_state, ctx);
+        });
+        self.save_button.update(ctx, |button, ctx| {
+            button.set_label(
+                if self.mode == InlineCommentMode::EditingExisting {
+                    "Update"
+                } else {
+                    "Comment"
+                },
+                ctx,
+            );
+        });
+    }
+
+    fn update_save_button_state(&mut self, ctx: &mut ViewContext<Self>) {
+        let is_empty = self
+            .body_editor
+            .as_ref(ctx)
+            .model()
+            .as_ref(ctx)
+            .is_empty(ctx);
+        if is_empty != self.save_button_disabled {
+            self.save_button_disabled = is_empty;
+            self.save_button.update(ctx, |button, ctx| {
+                button.set_disabled(is_empty, ctx);
+            });
+        }
+    }
+
+    fn handle_body_editor_event(&mut self, event: &EditorViewEvent, ctx: &mut ViewContext<Self>) {
+        match event {
+            EditorViewEvent::Edited => {
+                self.update_save_button_state(ctx);
+                ctx.emit(InlineCommentViewEvent::ContentChanged);
+            }
+            EditorViewEvent::CmdEnter => self.save(ctx),
+            EditorViewEvent::EscapePressed => self.cancel(ctx),
+            _ => {}
+        }
+    }
+
+    fn save(&mut self, ctx: &mut ViewContext<Self>) {
+        let comment_text = self.comment_text(ctx);
+        if comment_text.trim().is_empty() {
+            return;
+        }
+        ctx.emit(InlineCommentViewEvent::CommentSaved {
+            id: self.id,
+            line: self.line.clone(),
+            comment_text,
+        });
+    }
+
+    fn cancel(&mut self, ctx: &mut ViewContext<Self>) {
+        ctx.emit(InlineCommentViewEvent::Cancelled { id: self.id });
+    }
+
     fn render_metadata(&self, appearance: &Appearance, background: ColorU) -> Box<dyn Element> {
         let theme = appearance.theme();
         let sub_text_color = theme.sub_text_color(Fill::Solid(background)).into_solid();
-
         let mut leading = Flex::row()
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_spacing(4.);
 
-        if self.comment.origin.is_imported_from_github() {
+        if self.origin.is_imported_from_github() {
             leading = leading.with_child(
                 ConstrainedBox::new(
                     Icon::Github
@@ -204,7 +390,7 @@ impl InlineCommentView {
         }
 
         let relative_time = human_readable_approx_duration(
-            Local::now() - self.comment.last_update_time,
+            Local::now() - self.last_update_time,
             true, /* sentence_case */
         );
         leading = leading.with_child(
@@ -221,7 +407,7 @@ impl InlineCommentView {
         leading.finish()
     }
 
-    fn render_action_buttons(&self) -> Box<dyn Element> {
+    fn render_saved_actions(&self) -> Box<dyn Element> {
         Flex::row()
             .with_spacing(4.)
             .with_children([
@@ -232,14 +418,45 @@ impl InlineCommentView {
             .finish()
     }
 
-    fn render_footer_row(&self, appearance: &Appearance, background: ColorU) -> Box<dyn Element> {
+    fn render_editing_actions(&self) -> Box<dyn Element> {
+        let mut actions = vec![ChildView::new(&self.cancel_button).finish()];
+        if self.mode == InlineCommentMode::EditingExisting {
+            actions.push(ChildView::new(&self.remove_button).finish());
+        }
+        actions.push(ChildView::new(&self.save_button).finish());
+
         Flex::row()
-            .with_main_axis_size(MainAxisSize::Max)
-            .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_child(Shrinkable::new(1., self.render_metadata(appearance, background)).finish())
-            .with_child(self.render_action_buttons())
+            .with_spacing(4.)
+            .with_children(actions)
+            .with_main_axis_alignment(MainAxisAlignment::End)
             .finish()
+    }
+
+    fn render_footer_row(&self, appearance: &Appearance, background: ColorU) -> Box<dyn Element> {
+        let action_buttons = if self.is_editing() {
+            self.render_editing_actions()
+        } else {
+            self.render_saved_actions()
+        };
+
+        let footer_row = Flex::row()
+            .with_main_axis_size(MainAxisSize::Max)
+            .with_cross_axis_alignment(CrossAxisAlignment::Center);
+
+        if self.mode == InlineCommentMode::NewDraft {
+            footer_row
+                .with_main_axis_alignment(MainAxisAlignment::End)
+                .with_child(action_buttons)
+                .finish()
+        } else {
+            footer_row
+                .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
+                .with_child(
+                    Shrinkable::new(1., self.render_metadata(appearance, background)).finish(),
+                )
+                .with_child(action_buttons)
+                .finish()
+        }
     }
 }
 
@@ -253,18 +470,13 @@ impl TypedActionView for InlineCommentView {
     fn handle_action(&mut self, action: &InlineCommentViewAction, ctx: &mut ViewContext<Self>) {
         match action {
             InlineCommentViewAction::Edit => {
-                ctx.emit(InlineCommentViewEvent::RequestEdit {
-                    id: self.comment.id,
-                    line: self.comment.line.clone(),
-                    comment_text: self.comment.comment_content.clone(),
-                    origin: self.comment.origin.clone(),
-                });
+                ctx.emit(InlineCommentViewEvent::RequestEdit { id: self.id });
             }
             InlineCommentViewAction::Remove => {
-                ctx.emit(InlineCommentViewEvent::RequestRemove {
-                    id: self.comment.id,
-                });
+                ctx.emit(InlineCommentViewEvent::RequestRemove { id: self.id });
             }
+            InlineCommentViewAction::Save => self.save(ctx),
+            InlineCommentViewAction::Cancel => self.cancel(ctx),
         }
     }
 }
@@ -276,36 +488,13 @@ impl View for InlineCommentView {
 
     fn render(&self, ctx: &AppContext) -> Box<dyn Element> {
         let appearance = Appearance::as_ref(ctx);
-        let theme = appearance.theme();
-        let background = blended_colors::neutral_2(theme);
-        let border_color = blended_colors::neutral_4(theme);
+        let background = inline_comment_background(appearance);
         let footer_row = self.render_footer_row(appearance, background);
-
-        let column = Flex::column()
-            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_child(
-                Container::new(ChildView::new(&self.body_editor).finish())
-                    .with_padding_bottom(4.)
-                    .with_padding_top(8.)
-                    .with_horizontal_padding(12.)
-                    .finish(),
-            )
-            .with_child(
-                Container::new(footer_row)
-                    .with_vertical_padding(4.)
-                    .with_horizontal_padding(12.)
-                    .with_border(Border::top(1.).with_border_fill(border_color))
-                    .finish(),
-            )
-            .finish();
-        ConstrainedBox::new(
-            Container::new(column)
-                .with_background_color(background)
-                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
-                .with_border(Border::all(1.).with_border_fill(border_color))
-                .finish(),
+        render_inline_comment_shell(
+            ChildView::new(&self.body_editor).finish(),
+            footer_row,
+            if self.is_editing() { Some(200.) } else { None },
+            appearance,
         )
-        .with_max_width(DEFAULT_COMMENT_MAX_WIDTH)
-        .finish()
     }
 }
