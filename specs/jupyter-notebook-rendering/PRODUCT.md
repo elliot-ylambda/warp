@@ -18,7 +18,7 @@ Non-goals: running a kernel, executing or re-executing cells, editing cells or o
 
 3. A markdown cell renders as formatted markdown identical to how Warp renders markdown elsewhere (headings, lists, bold/italic, inline code, links, images, etc.).
 
-4. A code cell renders as a syntax-highlighted fenced code block. The highlight language comes from the notebook's kernel/language metadata (e.g. `python`); if the notebook declares no language, the code still renders as a code block without language-specific highlighting.
+4. A code cell renders as a syntax-highlighted fenced code block. The highlight language comes from the notebook's kernel/language metadata (e.g. `python`); if the notebook declares no language, the code still renders as a code block without language-specific highlighting. Jupyter `raw` cells render as an unhighlighted code block so their contents cannot inject unexpected markdown.
 
 5. A code cell's source renders verbatim, preserving original line breaks, indentation, and blank lines. Cell input prompt numbers (e.g. `In [3]:`) are not shown.
 

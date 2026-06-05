@@ -166,6 +166,13 @@ fn test_load_jupyter_notebook_renders_cells() {
                 "raw notebook JSON should not be shown, got: {markdown}"
             );
 
+            // The Rendered/Raw toggle is exposed for .ipynb, the same way it is
+            // for markdown files (PRODUCT invariant 14).
+            assert!(
+                handle.as_ref(ctx).shows_markdown_toggle(),
+                "rendered notebook should expose the Rendered/Raw toggle"
+            );
+
             // Rendering should not panic.
             handle.as_ref(ctx).render(ctx);
         });

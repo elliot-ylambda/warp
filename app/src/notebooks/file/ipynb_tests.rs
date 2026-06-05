@@ -235,3 +235,45 @@ fn test_truncate_chars_respects_char_boundary() {
     assert_eq!(truncate_chars("héllo", 2), "hé");
     assert_eq!(truncate_chars("abc", 10), "abc");
 }
+
+#[test]
+fn test_oversized_text_output_is_truncated() {
+    // A pathologically large stream output is truncated rather than rendered in
+    // full, so a single cell can't bloat the buffer (PRODUCT invariant 12).
+    let big = "a".repeat(MAX_TEXT_OUTPUT_CHARS + 100);
+    let json = format!(
+        r#"{{"nbformat": 4, "cells": [{{"cell_type": "code", "source": "x", "outputs": [{{"output_type": "stream", "name": "stdout", "text": "{big}"}}]}}]}}"#
+    );
+
+    let md = ipynb_to_markdown(&json).expect("should convert");
+    assert!(
+        md.contains("[output truncated]"),
+        "expected truncation marker"
+    );
+    // The rendered output is bounded near the limit, not the full oversized size.
+    assert!(
+        md.chars().count() <= MAX_TEXT_OUTPUT_CHARS + 200,
+        "output should be truncated near the limit, got {} chars",
+        md.chars().count()
+    );
+}
+
+#[test]
+fn test_oversized_image_is_omitted_with_placeholder() {
+    // An embedded image larger than the cap is replaced with a visible
+    // placeholder rather than embedded (PRODUCT invariant 12).
+    let big = "A".repeat(MAX_IMAGE_DATA_CHARS + 1);
+    let json = format!(
+        r#"{{"nbformat": 4, "cells": [{{"cell_type": "code", "source": "plot()", "outputs": [{{"output_type": "display_data", "data": {{"image/png": "{big}"}}, "metadata": {{}}}}]}}]}}"#
+    );
+
+    let md = ipynb_to_markdown(&json).expect("should convert");
+    assert!(
+        md.contains("[output image omitted: exceeds size limit]"),
+        "expected placeholder for oversized image"
+    );
+    assert!(
+        !md.contains("data:image/png;base64,"),
+        "oversized image should not be embedded as a data URI"
+    );
+}

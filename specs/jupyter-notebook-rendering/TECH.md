@@ -34,6 +34,7 @@ pub fn ipynb_to_markdown(json: &str) -> Result<String, IpynbError>;
 - Conversion rules:
   - markdown cell → source verbatim.
   - code cell → fenced block ` ```<lang> … ``` `.
+  - raw cell → unhighlighted fenced block (its contents can't inject markdown).
   - `stream` / `execute_result["text/plain"]` / `error.traceback` → fenced text block (strip ANSI from tracebacks).
   - `display_data`/`execute_result` with `image/png`|`image/jpeg` → `![output](data:image/png;base64,…)`.
   - `text/html` and other rich MIME → skipped in v1 (see Follow-ups).
