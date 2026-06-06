@@ -3352,6 +3352,9 @@ impl TelemetryEvent {
                     FileTarget::MarkdownViewer(layout) => {
                         ("warp_markdown_viewer", Some(*layout), None)
                     }
+                    FileTarget::JupyterNotebook(layout) => {
+                        ("warp_jupyter_notebook", Some(*layout), None)
+                    }
                     FileTarget::CodeEditor(layout) => ("warp_code_editor", Some(*layout), None),
                     FileTarget::EnvEditor => ("env_editor", None, None),
                     FileTarget::SystemDefault => ("system_default", None, None),

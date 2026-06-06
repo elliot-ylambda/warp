@@ -4,6 +4,8 @@ use std::path::Path;
 use settings::Setting as _;
 
 use super::*;
+#[cfg(feature = "local_fs")]
+use crate::features::FeatureFlag;
 
 #[test]
 fn test_binary_files_not_openable() {
@@ -77,6 +79,64 @@ fn test_resolve_file_target_binary_uses_env_editor() {
         None,
     );
     assert_eq!(target, FileTarget::EnvEditor);
+}
+
+#[test]
+#[cfg(feature = "local_fs")]
+fn test_resolve_file_target_jupyter_notebook_flag_on() {
+    // With the editing feature enabled, `.ipynb` opens in the cell-based
+    // notebook view regardless of editor choice or markdown preference (inv 1).
+    let _guard = FeatureFlag::JupyterNotebookEditing.override_enabled(true);
+    let target = resolve_file_target_with_editor_choice(
+        Path::new("analysis.ipynb"),
+        EditorChoice::Warp,
+        true, /* prefer_markdown_viewer */
+        EditorLayout::SplitPane,
+        None,
+    );
+    assert_eq!(target, FileTarget::JupyterNotebook(EditorLayout::SplitPane));
+}
+
+#[test]
+#[cfg(feature = "local_fs")]
+fn test_resolve_file_target_jupyter_notebook_flag_off() {
+    // With the feature disabled, `.ipynb` behaves exactly as before: a text
+    // file opened in the code editor (inv 22).
+    let _guard = FeatureFlag::JupyterNotebookEditing.override_enabled(false);
+    let target = resolve_file_target_with_editor_choice(
+        Path::new("analysis.ipynb"),
+        EditorChoice::Warp,
+        true, /* prefer_markdown_viewer */
+        EditorLayout::NewTab,
+        None,
+    );
+    assert_eq!(target, FileTarget::CodeEditor(EditorLayout::NewTab));
+}
+
+#[test]
+#[cfg(feature = "local_fs")]
+fn test_resolve_file_target_jupyter_notebook_overrides_editor_choice() {
+    // The notebook target wins even when the user configured an external
+    // editor, since it is the default treatment for `.ipynb` when enabled.
+    let _guard = FeatureFlag::JupyterNotebookEditing.override_enabled(true);
+    let target = resolve_file_target_with_editor_choice(
+        Path::new("nb.ipynb"),
+        EditorChoice::ExternalEditor(Editor::VSCode),
+        false, /* prefer_markdown_viewer */
+        EditorLayout::SplitPane,
+        None,
+    );
+    assert_eq!(target, FileTarget::JupyterNotebook(EditorLayout::SplitPane));
+}
+
+#[test]
+fn test_ipynb_classified_as_text() {
+    // `.ipynb` classification is unchanged (Text) so non-routing surfaces are
+    // unaffected; only the open-flow routing differs behind the flag.
+    assert_eq!(
+        is_file_openable_in_warp(Path::new("analysis.ipynb")),
+        Some(OpenableFileType::Text)
+    );
 }
 
 #[test]

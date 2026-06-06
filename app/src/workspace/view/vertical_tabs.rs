@@ -3734,6 +3734,9 @@ impl PaneGroup {
             ),
             IPaneType::CodeDiff => TypedPane::CodeDiff,
             IPaneType::File => TypedPane::File,
+            // The editable Jupyter notebook is a file-backed editor; present it
+            // like a file in the vertical tabs.
+            IPaneType::JupyterNotebook => TypedPane::File,
             IPaneType::Notebook => {
                 let is_plan = self
                     .downcast_pane_by_id::<NotebookPane>(pane_id)

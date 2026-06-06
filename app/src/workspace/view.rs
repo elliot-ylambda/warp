@@ -270,14 +270,14 @@ use crate::notebooks::CloudNotebook;
 use crate::notification::NotificationContext;
 use crate::palette::PaletteMode;
 use crate::pane_group::pane::ActionOrigin;
-#[cfg(feature = "local_fs")]
-use crate::pane_group::FilePane;
 use crate::pane_group::{
     self, AIFactPane, AnyPaneContent, ChildAgentOrigin, CodeDiffPane, CodePane, CodeReviewPanelArg,
     Direction as PaneGroupDirection, Direction, EnvironmentManagementPane,
     ExecutionProfileEditorPane, NetworkLogPane, NewTerminalOptions, PaneGroup, PaneId, PanesLayout,
     TabBarHoverIndex, TerminalPaneId,
 };
+#[cfg(feature = "local_fs")]
+use crate::pane_group::{FilePane, JupyterNotebookPane};
 use crate::persistence::ModelEvent;
 use crate::projects::ProjectManagementModel;
 use crate::prompt::editor_modal::{
@@ -6007,6 +6007,9 @@ impl Workspace {
                     ctx,
                 );
             }
+            FileTarget::JupyterNotebook(layout) => {
+                self.open_jupyter_notebook(LocalOrRemotePath::Local(path.clone()), layout, ctx);
+            }
             FileTarget::EnvEditor => {
                 let editor_value: Option<String> = self
                     .get_active_session(ctx)
@@ -8014,6 +8017,38 @@ impl Workspace {
             Some("Settings".to_owned()),
             ctx,
         );
+    }
+
+    /// Open an `.ipynb` file as an editable, cell-based Jupyter notebook pane.
+    #[cfg(feature = "local_fs")]
+    fn open_jupyter_notebook(
+        &mut self,
+        path: LocalOrRemotePath,
+        layout: EditorLayout,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let pane = JupyterNotebookPane::new(Some(path), ctx);
+
+        match layout {
+            EditorLayout::NewTab => {
+                let new_tab_placement_setting = TabSettings::as_ref(ctx).new_tab_placement;
+                let new_idx = match new_tab_placement_setting {
+                    NewTabPlacement::AfterAllTabs => self.tab_count(),
+                    NewTabPlacement::AfterCurrentTab => self.active_tab_index + 1,
+                };
+                self.add_tab_from_existing_pane(Box::new(pane), new_idx, ctx);
+            }
+            EditorLayout::SplitPane => {
+                self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
+                    pane_group.add_pane_with_direction(
+                        Direction::Right,
+                        pane,
+                        true, /* focus_new_pane */
+                        ctx,
+                    );
+                });
+            }
+        }
     }
 
     /// Open a file from the given session as a notebook pane.

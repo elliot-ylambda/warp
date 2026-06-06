@@ -1,4 +1,5 @@
 use regex::Regex;
+use warp::features::FeatureFlag;
 use warp::integration_testing::step::new_step_with_default_assertions;
 use warp::integration_testing::tab::assert_pane_title;
 use warp::integration_testing::terminal::wait_until_bootstrapped_single_pane_for_tab;
@@ -9,6 +10,16 @@ use warpui_core::{async_assert, async_assert_eq, App};
 
 use super::{new_builder, Builder};
 use crate::util::write_all_rc_files_for_test;
+
+/// A minimal, valid nbformat v4 notebook used by the `.ipynb` routing tests.
+/// Valid content matters: the real cell-based view keeps a parseable notebook
+/// in the Jupyter pane, whereas an unparseable one would fall back to the code
+/// editor.
+const MINIMAL_IPYNB: &str = concat!(
+    "{\"cells\":[{\"cell_type\":\"markdown\",\"metadata\":{},",
+    "\"source\":[\"# Title\"]}],",
+    "\"metadata\":{},\"nbformat\":4,\"nbformat_minor\":5}",
+);
 
 fn open_file_tree_panel(app: &mut App) {
     let window_id = app.read(|ctx| {
@@ -255,6 +266,94 @@ pub fn test_file_tree_non_openable_files() -> Builder {
                             pane_group.pane_count(),
                             1,
                             "Binary file should not open in Warp, should stay at 1 pane"
+                        )
+                    })
+                }),
+        )
+}
+
+/// With the editing feature enabled, clicking an `.ipynb` file in the file tree
+/// opens it in the editable, cell-based Jupyter notebook pane (not a code pane).
+pub fn test_file_tree_opens_ipynb_in_jupyter_pane_when_flag_enabled() -> Builder {
+    FeatureFlag::JupyterNotebookEditing.set_enabled(true);
+    new_builder()
+        .with_setup(|utils| {
+            let test_dir = utils.test_dir();
+            let dir_string = test_dir
+                .to_str()
+                .expect("Should be able to convert test dir to str");
+            write_all_rc_files_for_test(&test_dir, format!("cd {dir_string}"));
+
+            std::fs::write(test_dir.join("analysis.ipynb"), MINIMAL_IPYNB)
+                .expect("Failed to create notebook file");
+        })
+        .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
+        .with_step(
+            new_step_with_default_assertions("Open file tree panel")
+                .with_action(|app, _, _| open_file_tree_panel(app)),
+        )
+        .with_step(
+            new_step_with_default_assertions("Click on analysis.ipynb in file tree")
+                .with_click_on_saved_position("file_tree_item:analysis.ipynb")
+                .add_assertion(|app, window_id| {
+                    let pane_group = pane_group_view(app, window_id, 0);
+                    pane_group.read(app, |pane_group, _ctx| {
+                        async_assert_eq!(
+                            pane_group.pane_count(),
+                            2,
+                            "Expected 2 panes after opening the notebook (terminal + notebook)"
+                        )
+                    })
+                })
+                .add_assertion(|app, window_id| {
+                    let pane_group = pane_group_view(app, window_id, 0);
+                    pane_group.read(app, |pane_group, _ctx| {
+                        let is_jupyter = pane_group
+                            .pane_by_index(1)
+                            .map(|pane| pane.id().is_jupyter_notebook_pane())
+                            .unwrap_or(false);
+                        async_assert!(
+                            is_jupyter,
+                            "Expected `.ipynb` to open an editable Jupyter notebook pane"
+                        )
+                    })
+                }),
+        )
+}
+
+/// With the editing feature disabled, an `.ipynb` file behaves exactly as
+/// before: it opens in the code editor as plain text (no notebook pane).
+pub fn test_file_tree_opens_ipynb_in_code_editor_when_flag_disabled() -> Builder {
+    FeatureFlag::JupyterNotebookEditing.set_enabled(false);
+    new_builder()
+        .with_setup(|utils| {
+            let test_dir = utils.test_dir();
+            let dir_string = test_dir
+                .to_str()
+                .expect("Should be able to convert test dir to str");
+            write_all_rc_files_for_test(&test_dir, format!("cd {dir_string}"));
+
+            std::fs::write(test_dir.join("analysis.ipynb"), MINIMAL_IPYNB)
+                .expect("Failed to create notebook file");
+        })
+        .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
+        .with_step(
+            new_step_with_default_assertions("Open file tree panel")
+                .with_action(|app, _, _| open_file_tree_panel(app)),
+        )
+        .with_step(
+            new_step_with_default_assertions("Click on analysis.ipynb in file tree")
+                .with_click_on_saved_position("file_tree_item:analysis.ipynb")
+                .add_assertion(|app, window_id| {
+                    let pane_group = pane_group_view(app, window_id, 0);
+                    pane_group.read(app, |pane_group, _ctx| {
+                        let is_code = pane_group
+                            .pane_by_index(1)
+                            .map(|pane| pane.id().is_code_pane())
+                            .unwrap_or(false);
+                        async_assert!(
+                            is_code,
+                            "Expected `.ipynb` to open in the code editor when the flag is off"
                         )
                     })
                 }),

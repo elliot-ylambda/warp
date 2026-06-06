@@ -447,6 +447,8 @@ fn register_tests() -> HashMap<&'static str, BoxedBuilderFn> {
     register_test!(test_file_tree_keyboard_navigation);
     register_test!(test_file_tree_non_openable_files);
     register_test!(test_file_tree_nested_file_opening);
+    register_test!(test_file_tree_opens_ipynb_in_jupyter_pane_when_flag_enabled);
+    register_test!(test_file_tree_opens_ipynb_in_code_editor_when_flag_disabled);
 
     // Go to Line tests
     register_test!(test_goto_line_dialog_open_close);

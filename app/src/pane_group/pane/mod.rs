@@ -19,6 +19,7 @@ pub(super) mod execution_profile_editor_pane;
 pub(super) mod file_pane;
 pub(super) mod get_started_pane;
 pub(super) mod get_started_view;
+pub(super) mod jupyter_notebook_pane;
 #[cfg(not(target_family = "wasm"))]
 pub(super) mod local_harness_launch;
 pub(super) mod network_log_pane;
@@ -60,6 +61,7 @@ use crate::notebooks::file::FileNotebookView;
 use crate::notebooks::notebook::NotebookView;
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::pane::get_started_view::GetStartedView;
+use crate::pane_group::pane::jupyter_notebook_pane::JupyterNotebookView;
 use crate::server::network_log_view::NetworkLogView;
 use crate::server::telemetry::SharingDialogSource;
 use crate::settings::PaneSettings;
@@ -149,6 +151,7 @@ pub(crate) enum IPaneType {
     GetStarted,
     NetworkLog,
     Welcome,
+    JupyterNotebook,
     DeferredPlaceholder,
     /// A pane type only for tests.
     #[cfg(test)]
@@ -173,6 +176,7 @@ impl Display for IPaneType {
             IPaneType::GetStarted => write!(f, "GetStarted"),
             IPaneType::NetworkLog => write!(f, "Network Log"),
             IPaneType::Welcome => write!(f, "Welcome"),
+            IPaneType::JupyterNotebook => write!(f, "Jupyter Notebook"),
             IPaneType::DeferredPlaceholder => write!(f, "Placeholder"),
             #[cfg(test)]
             IPaneType::Dummy => write!(f, "Dummy"),
@@ -203,6 +207,13 @@ impl PaneId {
     /// Creates a [`PaneId`] from a [`ViewContext<PaneView<FileNotebookView>>`]
     pub fn from_file_pane_ctx(ctx: &ViewContext<PaneView<FileNotebookView>>) -> Self {
         Self::new_from_ctx(IPaneType::File, ctx)
+    }
+
+    /// Creates a [`PaneId`] from a [`ViewContext<PaneView<JupyterNotebookView>>`]
+    pub fn from_jupyter_notebook_pane_ctx(
+        ctx: &ViewContext<PaneView<JupyterNotebookView>>,
+    ) -> Self {
+        Self::new_from_ctx(IPaneType::JupyterNotebook, ctx)
     }
 
     /// Creates a [`PaneId`] from a [`ViewContext<PaneView<NotebookView>>`]
@@ -291,6 +302,13 @@ impl PaneId {
     /// Creates a [`PaneId`] from a [`PaneView<FileNotebookView>`] entity ID.
     pub fn from_file_pane_view(file_pane_view: &ViewHandle<PaneView<FileNotebookView>>) -> Self {
         Self::new(IPaneType::File, file_pane_view)
+    }
+
+    /// Creates a [`PaneId`] from a [`PaneView<JupyterNotebookView>`] entity ID.
+    pub fn from_jupyter_notebook_pane_view(
+        jupyter_pane_view: &ViewHandle<PaneView<JupyterNotebookView>>,
+    ) -> Self {
+        Self::new(IPaneType::JupyterNotebook, jupyter_pane_view)
     }
 
     /// Creates a [`PaneId`] from a [`PaneView<TextView>`] entity ID.
@@ -425,6 +443,10 @@ impl PaneId {
         matches!(self.0.pane_type, IPaneType::File)
     }
 
+    pub fn is_jupyter_notebook_pane(&self) -> bool {
+        matches!(self.0.pane_type, IPaneType::JupyterNotebook)
+    }
+
     pub fn is_code_diff_pane(&self) -> bool {
         matches!(self.0.pane_type, IPaneType::CodeDiff)
     }
@@ -455,6 +477,9 @@ impl PaneId {
             }
             IPaneType::File => {
                 ChildView::<PaneView<FileNotebookView>>::with_id(self.0.pane_view_id).finish()
+            }
+            IPaneType::JupyterNotebook => {
+                ChildView::<PaneView<JupyterNotebookView>>::with_id(self.0.pane_view_id).finish()
             }
             IPaneType::Code => {
                 ChildView::<PaneView<CodeView>>::with_id(self.0.pane_view_id).finish()

@@ -184,6 +184,7 @@ pub use pane::env_var_collection_pane::EnvVarCollectionPane;
 pub use pane::environment_management_pane::EnvironmentManagementPane;
 pub use pane::execution_profile_editor_pane::ExecutionProfileEditorPane;
 pub use pane::file_pane::FilePane;
+pub use pane::jupyter_notebook_pane::JupyterNotebookPane;
 pub use pane::network_log_pane::NetworkLogPane;
 pub use pane::notebook_pane::NotebookPane;
 pub use pane::settings_pane::SettingsPane;
@@ -1717,13 +1718,31 @@ impl PaneGroup {
                         notebook_id,
                         settings,
                     } => Box::new(NotebookPane::restore(notebook_id, &settings, ctx)?),
-                    NotebookPaneSnapshot::LocalFileNotebook { path } => Box::new(FilePane::new(
-                        path.map(LocalOrRemotePath::Local),
-                        None,
+                    NotebookPaneSnapshot::LocalFileNotebook { path } => {
+                        // Re-route `.ipynb` back to the editable Jupyter pane when
+                        // the feature is on; otherwise restore the markdown
+                        // file-notebook pane as before.
                         #[cfg(feature = "local_fs")]
-                        None,
-                        ctx,
-                    )),
+                        {
+                            let restore_as_jupyter = path
+                                .as_ref()
+                                .is_some_and(warp_util::file_type::is_jupyter_notebook_file)
+                                && FeatureFlag::JupyterNotebookEditing.is_enabled();
+                            let local_path = path.map(LocalOrRemotePath::Local);
+                            if restore_as_jupyter {
+                                Box::new(JupyterNotebookPane::new(local_path, ctx))
+                                    as Box<dyn AnyPaneContent + 'static>
+                            } else {
+                                Box::new(FilePane::new(local_path, None, None, ctx))
+                                    as Box<dyn AnyPaneContent + 'static>
+                            }
+                        }
+                        #[cfg(not(feature = "local_fs"))]
+                        {
+                            Box::new(FilePane::new(path.map(LocalOrRemotePath::Local), None, ctx))
+                                as Box<dyn AnyPaneContent + 'static>
+                        }
+                    }
                 };
 
                 let pane_id = pane.as_pane().id();

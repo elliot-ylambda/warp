@@ -3,8 +3,12 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-pub use warp_util::file_type::{is_binary_file, is_file_content_binary, is_markdown_file};
+pub use warp_util::file_type::{
+    is_binary_file, is_file_content_binary, is_jupyter_notebook_file, is_markdown_file,
+};
 
+#[cfg(feature = "local_fs")]
+use crate::features::FeatureFlag;
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::{settings::EditorChoice, Editor, EditorSettings};
 
@@ -45,6 +49,8 @@ pub enum OpenableFileType {
 pub enum FileTarget {
     /// Open in Warp's Markdown viewer.
     MarkdownViewer(EditorLayout),
+    /// Open in Warp's editable, cell-based Jupyter notebook view.
+    JupyterNotebook(EditorLayout),
     /// Open in Warp's Code Editor.
     CodeEditor(EditorLayout),
     /// Open in an external editor (e.g. VS Code, Emacs).
@@ -170,6 +176,13 @@ pub fn resolve_file_target_to_open_in_warp(
     let is_markdown = matches!(openable_file_type, Some(OpenableFileType::Markdown));
     let layout = layout.unwrap_or(*settings.open_file_layout);
 
+    // Jupyter notebooks open in the editable, cell-based notebook view. This is
+    // the default for `.ipynb` when the feature is enabled, ahead of any
+    // "prefer markdown viewer" preference.
+    if is_jupyter_notebook_file(path) && FeatureFlag::JupyterNotebookEditing.is_enabled() {
+        return FileTarget::JupyterNotebook(layout);
+    }
+
     if is_markdown && *settings.prefer_markdown_viewer {
         return FileTarget::MarkdownViewer(layout);
     }
@@ -204,6 +217,13 @@ pub fn resolve_file_target_with_editor_choice(
     let is_markdown = matches!(is_openable_in_warp, Some(OpenableFileType::Markdown));
     let layout = layout.unwrap_or(default_layout);
     let is_openable_in_warp = is_openable_in_warp.is_some();
+
+    // 0. Jupyter notebooks open in the editable, cell-based notebook view. This
+    //    is the default for `.ipynb` when the feature is enabled, ahead of the
+    //    markdown-viewer preference and the configured editor choice.
+    if is_jupyter_notebook_file(path) && FeatureFlag::JupyterNotebookEditing.is_enabled() {
+        return FileTarget::JupyterNotebook(layout);
+    }
 
     // 1. Markdown Viewer (only if user preference specified)
     if is_markdown && prefer_markdown_viewer {

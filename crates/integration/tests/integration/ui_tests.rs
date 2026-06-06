@@ -321,6 +321,8 @@ integration_tests! {
     test_file_tree_keyboard_navigation,
     test_file_tree_non_openable_files,
     test_file_tree_nested_file_opening,
+    test_file_tree_opens_ipynb_in_jupyter_pane_when_flag_enabled,
+    test_file_tree_opens_ipynb_in_code_editor_when_flag_disabled,
 
     // Go to Line tests
     test_goto_line_dialog_open_close,
