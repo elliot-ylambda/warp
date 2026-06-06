@@ -120,7 +120,7 @@ impl AgentProcess {
     #[allow(clippy::disallowed_types)]
     fn spawn(prompt: &str, conversation_id: Option<&str>) -> Result<Self> {
         let binary = resolve_agent_binary();
-        let mut args = vec!["agent", "run", "--prompt", prompt, "--output-format", "ndjson"];
+        let mut args = vec!["agent", "run", "--prompt", prompt, "--output-format", "ndjson", "--model", "kimi-k26-fireworks"];
         let conv_flag;
         if let Some(id) = conversation_id {
             conv_flag = id.to_string();
