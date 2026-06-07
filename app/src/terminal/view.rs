@@ -3934,7 +3934,11 @@ impl TerminalView {
         ctx.subscribe_to_model(
             &privacy_settings_handle,
             |me, privacy_settings_handle, event, ctx| {
-                if let PrivacySettingsChangedEvent::UpdateIsTelemetryEnabled { .. } = event {
+                if matches!(
+                    event,
+                    PrivacySettingsChangedEvent::UpdateIsTelemetryEnabled { .. }
+                        | PrivacySettingsChangedEvent::UpdateOrganizationTelemetryPolicy { .. }
+                ) {
                     me.privacy_settings_snapshot =
                         privacy_settings_handle.as_ref(ctx).get_snapshot(ctx)
                 }

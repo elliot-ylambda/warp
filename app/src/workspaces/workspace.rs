@@ -450,6 +450,26 @@ pub struct UsageVisibility {
     pub max_prior_cycles: MaxPriorCycles,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TelemetryEnablementSetting {
+    Disabled,
+    Enabled,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum OrganizationTelemetryPolicy {
+    #[default]
+    Unknown,
+    Unmanaged,
+    Enforced(TelemetryEnablementSetting),
+}
+
+impl OrganizationTelemetryPolicy {
+    pub fn is_enforced(self) -> bool {
+        matches!(self, Self::Enforced(_))
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub enum HostEnablementSetting {
     Enforce,
@@ -758,7 +778,8 @@ pub struct LlmSettings {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TelemetrySettings {
-    pub force_enabled: bool,
+    #[serde(default)]
+    pub policy: OrganizationTelemetryPolicy,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

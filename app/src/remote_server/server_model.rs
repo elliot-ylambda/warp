@@ -14,6 +14,7 @@ use remote_server::proto::OpenBufferSuccess;
 use repo_metadata::repositories::{DetectedRepositories, RepoDetectionSource};
 use repo_metadata::{RepoMetadataEvent, RepoMetadataModel, RepositoryIdentifier};
 use warp_core::channel::ChannelState;
+use warp_core::interval_timer::TimingDataPoint;
 use warp_core::{safe_error, SessionId};
 use warp_files::{FileModel, FileModelEvent};
 use warp_util::content_version::ContentVersion;
@@ -75,9 +76,13 @@ use crate::ai::blocklist::{read_local_file_context, ReadFileContextResult};
 use crate::auth::auth_state::{AuthState, AuthStateProvider};
 use crate::features::FeatureFlag;
 use crate::server::server_api::ServerApiProvider;
+use crate::settings::PrivacySettings;
 use crate::terminal::model::session::command_executor::{
     ExecuteCommandOptions, LocalCommandExecutor,
 };
+use crate::workspaces::update_manager::TeamUpdateManager;
+use crate::workspaces::workspace::OrganizationTelemetryPolicy;
+use crate::{send_telemetry_sync_from_ctx, TelemetryEvent};
 
 /// Outcome of dispatching a request-style `ClientMessage`.
 ///
@@ -233,6 +238,10 @@ pub struct ServerModel {
     /// In-flight host-scoped requests whose response may be delivered on
     /// a different connection if the originating connection disconnects.
     host_scoped_requests: HashMap<RequestId, ConnectionId>,
+    /// One-shot startup telemetry held until the first authenticated workspace-policy refresh.
+    pending_startup_timing_data: Option<Vec<TimingDataPoint>>,
+    /// Prevents concurrent Initialize messages from spawning duplicate policy refreshes.
+    telemetry_policy_refresh_in_flight: bool,
 }
 
 impl Entity for ServerModel {
@@ -242,7 +251,10 @@ impl Entity for ServerModel {
 impl SingletonEntity for ServerModel {}
 
 impl ServerModel {
-    pub fn new(ctx: &mut ModelContext<Self>) -> Self {
+    pub fn new(
+        pending_startup_timing_data: Option<Vec<TimingDataPoint>>,
+        ctx: &mut ModelContext<Self>,
+    ) -> Self {
         let host_id = uuid::Uuid::new_v4().to_string();
         log::info!(
             "Daemon started: PID={}, host_id={}",
@@ -261,6 +273,8 @@ impl ServerModel {
             buffers: ServerBufferTracker::new(),
             diff_states: ctx.add_model(|_| RemoteDiffStateManager::new()),
             host_scoped_requests: HashMap::new(),
+            pending_startup_timing_data,
+            telemetry_policy_refresh_in_flight: false,
         };
         // Subscribe to FileModel and RepoMetadataModel events
         // file operation results and repo metadata pushes are forwarded to all
@@ -597,6 +611,45 @@ impl ServerModel {
         model
     }
 
+    /// Resolves the daemon's telemetry policy after an authenticated context is supplied.
+    /// Initialize and Authenticate remain non-blocking; startup telemetry is emitted once only
+    /// after a successful resolution.
+    fn refresh_telemetry_policy_after_auth(&mut self, ctx: &mut ModelContext<Self>) {
+        if !self.should_refresh_telemetry_policy_after_auth() {
+            return;
+        }
+
+        PrivacySettings::handle(ctx).update(ctx, |settings, ctx| {
+            settings.set_organization_telemetry_policy(OrganizationTelemetryPolicy::Unknown, ctx);
+        });
+        self.telemetry_policy_refresh_in_flight = true;
+        let refresh = TeamUpdateManager::handle(ctx)
+            .update(ctx, |manager, ctx| manager.refresh_workspace_metadata(ctx));
+        let _ = ctx.spawn(refresh, |server, result, ctx| {
+            server.telemetry_policy_refresh_in_flight = false;
+            match result {
+                Ok(Ok(())) => {
+                    if let Some(timing_data) = server.pending_startup_timing_data.take() {
+                        send_telemetry_sync_from_ctx!(
+                            TelemetryEvent::RemoteServerDaemonStartup { timing_data },
+                            ctx
+                        );
+                    }
+                }
+                Ok(Err(error)) => {
+                    log::warn!("Daemon: workspace metadata refresh failed: {error:#}")
+                }
+                Err(_) => log::warn!("Daemon: workspace metadata refresh was canceled"),
+            }
+        });
+    }
+
+    fn should_refresh_telemetry_policy_after_auth(&self) -> bool {
+        FeatureFlag::EnterpriseTelemetryPolicy.is_enabled()
+            && self.auth_state.is_logged_in()
+            && !self.telemetry_policy_refresh_in_flight
+    }
+
     /// Called when a proxy connects.  Inserts `conn_tx` into the connection
     /// map so `send_server_message` can route responses to this proxy, and
     /// cancels the grace timer if it was running.
@@ -799,7 +852,7 @@ impl ServerModel {
                         self.handle_abort(m, &request_id, ctx);
                     }
                     Some(notification::Message::Authenticate(m)) => {
-                        self.handle_authenticate(m);
+                        self.handle_authenticate(m, ctx);
                     }
                     Some(notification::Message::UpdatePreferences(m)) => {
                         self.handle_update_preferences(m, ctx);
@@ -1417,6 +1470,7 @@ impl ServerModel {
     ) -> HandlerOutcome {
         log::info!("Handling Initialize (request_id={request_id})");
         self.apply_initialize_auth(&msg);
+        self.refresh_telemetry_policy_after_auth(ctx);
         Self::apply_codebase_index_limits(msg.codebase_index_limits.as_ref(), ctx);
         CodebaseIndexManager::handle(ctx).update(ctx, |manager, ctx| {
             manager.start_persisted_index_restore(ctx);
@@ -1513,7 +1567,12 @@ impl ServerModel {
 
     /// Handles `Authenticate` by replacing the daemon-wide credential.
     /// This is a notification — no response is sent.
-    fn handle_authenticate(&mut self, msg: Authenticate) {
+    fn handle_authenticate(&mut self, msg: Authenticate, ctx: &mut ModelContext<Self>) {
+        self.apply_authenticate_auth(msg);
+        self.refresh_telemetry_policy_after_auth(ctx);
+    }
+
+    fn apply_authenticate_auth(&mut self, msg: Authenticate) {
         self.auth_state
             .set_remote_server_bearer_token(msg.auth_token);
     }

@@ -3531,6 +3531,7 @@ type TelemetryDataCollectionPolicy {
 }
 
 type TelemetrySettings {
+  forceDisabled: Boolean!
   forceEnabled: Boolean!
 }
 

@@ -23,7 +23,9 @@ use crate::server::server_api::auth::MockAuthClient;
 use crate::server::server_api::auth::{AuthClient, SyncedUserSettings};
 use crate::server::server_api::ServerApiProvider;
 use crate::terminal::safe_mode_settings::SafeModeSettings;
-use crate::workspaces::workspace::EnterpriseSecretRegex;
+use crate::workspaces::workspace::{
+    EnterpriseSecretRegex, OrganizationTelemetryPolicy, TelemetryEnablementSetting,
+};
 
 pub trait RegexDisplayInfo {
     fn pattern(&self) -> &str;
@@ -156,10 +158,9 @@ pub struct PrivacySettings {
     /// List of enterprise-level secret regexes provided by the organization.
     /// These are kept separate from user-level secrets to support additive behavior.
     pub enterprise_secret_regex_list: Vec<CustomSecretRegex>,
-    /// Whether or not the user's organization has forced telemetry on, in which case we ignore any
-    /// user local/cloud settings. If false, we fall back to the user's settings.
-    /// This is populated by the server when teams data is fetched.
-    pub is_telemetry_force_enabled: bool,
+    /// The effective telemetry policy for the current organization. A logged-in session starts
+    /// Unknown and fails closed until fresh workspace metadata resolves the policy.
+    organization_telemetry_policy: OrganizationTelemetryPolicy,
     /// Whether or not the user's organization has enabled enterprise secret redaction.
     /// This is populated by the server when teams data is fetched.
     pub is_enterprise_secret_redaction_enabled: bool,
@@ -170,7 +171,7 @@ pub struct PrivacySettings {
 pub struct PrivacySettingsSnapshot {
     is_telemetry_enabled: bool,
     is_crash_reporting_enabled: bool,
-    is_telemetry_force_enabled: bool,
+    organization_telemetry_policy: OrganizationTelemetryPolicy,
     should_collect_ai_ugc_telemetry: bool,
     // This is an option so that, if a user has not set this value (and it's set to its default value of true),
     // the default value won't override a value that the user previously set on a different device.
@@ -191,15 +192,30 @@ impl PrivacySettingsSnapshot {
         self.is_crash_reporting_enabled
     }
 
-    pub fn is_telemetry_force_enabled(&self) -> bool {
-        self.is_telemetry_force_enabled
+    pub fn organization_telemetry_policy(&self) -> OrganizationTelemetryPolicy {
+        self.organization_telemetry_policy
     }
 
     pub fn should_disable_telemetry(&self) -> bool {
-        // If a user has opted in to the agent mode analytics experiment, telemetry must be enabled.
-        !self.is_telemetry_enabled
-            && !self.is_telemetry_force_enabled
-            && !FeatureFlag::AgentModeAnalytics.is_enabled()
+        if !FeatureFlag::EnterpriseTelemetryPolicy.is_enabled() {
+            // Preserve legacy force-enable behavior while the new enterprise telemetry policy
+            // enforcement is rolled out.
+            return !self.is_telemetry_enabled
+                && !matches!(
+                    self.organization_telemetry_policy,
+                    OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Enabled)
+                )
+                && !FeatureFlag::AgentModeAnalytics.is_enabled();
+        }
+        match self.organization_telemetry_policy {
+            OrganizationTelemetryPolicy::Unknown => true,
+            OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Disabled) => true,
+            OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Enabled) => false,
+            OrganizationTelemetryPolicy::Unmanaged => {
+                // If a user has opted in to the agent mode analytics experiment, telemetry must be enabled.
+                !self.is_telemetry_enabled && !FeatureFlag::AgentModeAnalytics.is_enabled()
+            }
+        }
     }
 
     pub fn should_collect_ai_ugc_telemetry(&self) -> bool {
@@ -208,11 +224,18 @@ impl PrivacySettingsSnapshot {
 
     #[cfg(test)]
     pub fn mock() -> Self {
+        Self::mock_with_organization_policy(OrganizationTelemetryPolicy::Unmanaged)
+    }
+
+    #[cfg(test)]
+    pub fn mock_with_organization_policy(
+        organization_telemetry_policy: OrganizationTelemetryPolicy,
+    ) -> Self {
         Self {
             cloud_conversation_storage_enabled: None,
             is_telemetry_enabled: true,
             is_crash_reporting_enabled: true,
-            is_telemetry_force_enabled: true,
+            organization_telemetry_policy,
             should_collect_ai_ugc_telemetry: true,
         }
     }
@@ -285,6 +308,12 @@ impl PrivacySettings {
             CustomSecretRegexList::new_from_storage(ctx);
         let has_initialized_default_secret_regexes: HasInitializedDefaultSecretRegexes =
             HasInitializedDefaultSecretRegexes::new_from_storage(ctx);
+        let organization_telemetry_policy =
+            if FeatureFlag::EnterpriseTelemetryPolicy.is_enabled() && auth_state.is_logged_in() {
+                OrganizationTelemetryPolicy::Unknown
+            } else {
+                OrganizationTelemetryPolicy::Unmanaged
+            };
 
         Self {
             auth_state,
@@ -294,18 +323,56 @@ impl PrivacySettings {
             is_cloud_conversation_storage_enabled,
             user_secret_regex_list,
             has_initialized_default_secret_regexes,
-            is_telemetry_force_enabled: false,
+            organization_telemetry_policy,
             is_enterprise_secret_redaction_enabled: false,
             enterprise_secret_regex_list: Vec::new(),
         }
     }
-
-    pub fn is_telemetry_force_enabled(&self) -> bool {
-        self.is_telemetry_force_enabled
+    pub fn organization_telemetry_policy(&self) -> OrganizationTelemetryPolicy {
+        self.organization_telemetry_policy
     }
 
-    pub fn set_is_telemetry_force_enabled(&mut self, is_telemetry_force_enabled: bool) {
-        self.is_telemetry_force_enabled = is_telemetry_force_enabled;
+    pub fn is_telemetry_managed_by_organization(&self) -> bool {
+        match self.organization_telemetry_policy {
+            OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Enabled) => true,
+            OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Disabled) => {
+                FeatureFlag::EnterpriseTelemetryPolicy.is_enabled()
+            }
+            OrganizationTelemetryPolicy::Unknown | OrganizationTelemetryPolicy::Unmanaged => false,
+        }
+    }
+
+    pub fn set_organization_telemetry_policy(
+        &mut self,
+        policy: OrganizationTelemetryPolicy,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let policy = if FeatureFlag::EnterpriseTelemetryPolicy.is_enabled() {
+            policy
+        } else {
+            match policy {
+                OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Enabled) => {
+                    policy
+                }
+                OrganizationTelemetryPolicy::Unknown
+                | OrganizationTelemetryPolicy::Unmanaged
+                | OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Disabled) => {
+                    OrganizationTelemetryPolicy::Unmanaged
+                }
+            }
+        };
+        let old_policy = self.organization_telemetry_policy;
+        if old_policy == policy {
+            return;
+        }
+        self.organization_telemetry_policy = policy;
+        ctx.emit(
+            PrivacySettingsChangedEvent::UpdateOrganizationTelemetryPolicy {
+                old_policy,
+                new_policy: policy,
+            },
+        );
+        ctx.notify();
     }
 
     pub fn is_enterprise_secret_redaction_enabled(&self) -> bool {
@@ -357,12 +424,12 @@ impl PrivacySettings {
         ctx.notify();
     }
 
-    pub fn refresh_to_default(&mut self) {
+    pub fn refresh_to_default(&mut self, ctx: &mut ModelContext<Self>) {
         // TODO(zach): this seems incorrect - should we also update the values on disk?
         self.is_telemetry_enabled = true;
         self.is_crash_reporting_enabled = true;
         self.is_cloud_conversation_storage_enabled = true;
-        self.is_telemetry_force_enabled = false;
+        self.set_organization_telemetry_policy(OrganizationTelemetryPolicy::Unmanaged, ctx);
         self.is_enterprise_secret_redaction_enabled = false;
     }
 
@@ -456,7 +523,7 @@ impl PrivacySettings {
             is_cloud_conversation_storage_enabled: true,
             user_secret_regex_list: CustomSecretRegexList::new(None),
             has_initialized_default_secret_regexes: HasInitializedDefaultSecretRegexes::new(None),
-            is_telemetry_force_enabled: false,
+            organization_telemetry_policy: OrganizationTelemetryPolicy::Unmanaged,
             is_enterprise_secret_redaction_enabled: false,
             enterprise_secret_regex_list: Vec::new(),
         }
@@ -472,7 +539,7 @@ impl PrivacySettings {
                 .then_some(false),
             is_telemetry_enabled: self.is_telemetry_enabled,
             is_crash_reporting_enabled: self.is_crash_reporting_enabled,
-            is_telemetry_force_enabled: self.is_telemetry_force_enabled,
+            organization_telemetry_policy: self.organization_telemetry_policy,
             should_collect_ai_ugc_telemetry: should_collect_ai_ugc_telemetry(
                 app,
                 self.is_telemetry_enabled,
@@ -822,6 +889,10 @@ pub enum PrivacySettingsChangedEvent {
         old_value: bool,
         new_value: bool,
     },
+    UpdateOrganizationTelemetryPolicy {
+        old_policy: OrganizationTelemetryPolicy,
+        new_policy: OrganizationTelemetryPolicy,
+    },
     CustomSecretRegexList {
         change_event_reason: ChangeEventReason,
     },
@@ -835,3 +906,7 @@ impl Entity for PrivacySettings {
 }
 
 impl SingletonEntity for PrivacySettings {}
+
+#[cfg(test)]
+#[path = "privacy_tests.rs"]
+mod tests;

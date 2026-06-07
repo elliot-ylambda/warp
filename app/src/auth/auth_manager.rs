@@ -43,6 +43,7 @@ use crate::terminal::shared_session::manager::Manager as SharedSessionManager;
 #[cfg(target_family = "wasm")]
 use crate::uri::browser_url_handler::{parse_current_url, update_browser_url};
 use crate::workspaces::team_tester::TeamTesterStatus;
+use crate::workspaces::workspace::OrganizationTelemetryPolicy;
 use crate::{
     persistence, report_error, report_if_error, send_telemetry_from_ctx,
     send_telemetry_sync_from_ctx, GlobalResourceHandlesProvider, TelemetryEvent,
@@ -428,6 +429,14 @@ impl AuthManager {
 
                 // Fetch the user's privacy settings from the server if any or update the server settings.
                 let privacy_settings_handle = PrivacySettings::handle(ctx);
+                if !from_refresh && FeatureFlag::EnterpriseTelemetryPolicy.is_enabled() {
+                    privacy_settings_handle.update(ctx, |privacy_settings, ctx| {
+                        privacy_settings.set_organization_telemetry_policy(
+                            OrganizationTelemetryPolicy::Unknown,
+                            ctx,
+                        );
+                    });
+                }
                 let privacy_settings_snapshot =
                     privacy_settings_handle.as_ref(ctx).get_snapshot(ctx);
                 ctx.update_model(&privacy_settings_handle, |privacy_settings, ctx| {
@@ -466,9 +475,6 @@ impl AuthManager {
                             warpui::time::get_current_time(),
                         );
 
-                        // Note that this snapshot might get overwritten to disabled after the server fetch.
-                        // However, it is still fine to flush to Rudderstack here as the login event is low-risk
-                        // and it is better to err on the side of over-reporting than under-reporting.
                         if let Err(e) = server_api
                             .flush_telemetry_events(privacy_settings_snapshot)
                             .await

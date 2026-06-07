@@ -48,12 +48,12 @@ use super::workspace::{
     BillingCycleUsageSummary, BillingMetadata, CloudConversationStorageSettings,
     CodebaseContextSettings, CustomerType, DelinquencyStatus, EmailInvite, EnterpriseSecretRegex,
     HostEnablementSetting, InstanceShape, InviteLinkDomainRestriction, LinkSharingSettings,
-    LlmSettings, MaxPriorCycles, SandboxedAgentSettings, SecretRedactionSettings,
-    SessionSharingPolicy, SharedNotebooksPolicy, SharedWorkflowsPolicy,
-    TelemetryDataCollectionPolicy, TelemetrySettings, Tier, UgcCollectionEnablementSetting,
-    UgcCollectionSettings, UgcDataCollectionPolicy, UsageBasedPricingPolicy,
-    UsageVisibilityGranularity, UsageVisibilityPolicy, WarpAiPolicy, Workspace,
-    WorkspaceInviteCode, WorkspaceMember, WorkspaceMemberUsageInfo, WorkspaceSettings,
+    LlmSettings, MaxPriorCycles, OrganizationTelemetryPolicy, SandboxedAgentSettings,
+    SecretRedactionSettings, SessionSharingPolicy, SharedNotebooksPolicy, SharedWorkflowsPolicy,
+    TelemetryDataCollectionPolicy, TelemetryEnablementSetting, TelemetrySettings, Tier,
+    UgcCollectionEnablementSetting, UgcCollectionSettings, UgcDataCollectionPolicy,
+    UsageBasedPricingPolicy, UsageVisibilityGranularity, UsageVisibilityPolicy, WarpAiPolicy,
+    Workspace, WorkspaceInviteCode, WorkspaceMember, WorkspaceMemberUsageInfo, WorkspaceSettings,
     WorkspaceSizePolicy,
 };
 use crate::ai::blocklist::usage::conversation_usage_view::ConversationUsageInfo;
@@ -62,6 +62,7 @@ use crate::ai::execution_profiles::{
 };
 use crate::ai::{BonusGrant, BonusGrantScope};
 use crate::auth::UserUid;
+use crate::features::FeatureFlag;
 use crate::server::cloud_objects::listener::ObjectUpdateMessage;
 use crate::server::experiments::ServerExperiment;
 use crate::server::graphql::schema::object_action_history_from_gql;
@@ -83,6 +84,26 @@ impl From<GqlTeamMember> for TeamMember {
             email: gql_team_member.email,
             role: gql_team_member.role.into(),
         }
+    }
+}
+
+pub(super) fn organization_telemetry_policy(
+    force_enabled: bool,
+    force_disabled: bool,
+) -> OrganizationTelemetryPolicy {
+    if !FeatureFlag::EnterpriseTelemetryPolicy.is_enabled() {
+        return if force_enabled {
+            OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Enabled)
+        } else {
+            OrganizationTelemetryPolicy::Unmanaged
+        };
+    }
+    if force_disabled {
+        OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Disabled)
+    } else if force_enabled {
+        OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Enabled)
+    } else {
+        OrganizationTelemetryPolicy::Unmanaged
     }
 }
 
@@ -797,10 +818,14 @@ impl From<warp_graphql::workspace::LlmSettings> for LlmSettings {
 
 impl From<GqlWorkspaceSettings> for WorkspaceSettings {
     fn from(gql_workspace_settings: GqlWorkspaceSettings) -> WorkspaceSettings {
+        let telemetry_policy = organization_telemetry_policy(
+            gql_workspace_settings.telemetry_settings.force_enabled,
+            gql_workspace_settings.telemetry_settings.force_disabled,
+        );
         Self {
             llm_settings: gql_workspace_settings.llm_settings.into(),
             telemetry_settings: TelemetrySettings {
-                force_enabled: gql_workspace_settings.telemetry_settings.force_enabled,
+                policy: telemetry_policy,
             },
             ugc_collection_settings: UgcCollectionSettings {
                 setting: UgcCollectionEnablementSetting::from(
@@ -1138,3 +1163,7 @@ impl From<GqlDiscoverableTeamData> for DiscoverableTeam {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "gql_convert_tests.rs"]
+mod tests;

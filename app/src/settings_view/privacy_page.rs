@@ -55,7 +55,8 @@ use crate::util::links::PRIVACY_POLICY_URL;
 use crate::view_components::{Dropdown, DropdownItem};
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::workspaces::workspace::{
-    AdminEnablementSetting, CustomerType, UgcCollectionEnablementSetting,
+    AdminEnablementSetting, CustomerType, OrganizationTelemetryPolicy, TelemetryEnablementSetting,
+    UgcCollectionEnablementSetting,
 };
 use crate::{report_if_error, send_telemetry_from_ctx};
 
@@ -1430,14 +1431,13 @@ impl SettingsWidget for AppAnalyticsWidget {
         "telemetry usage analytics data collection"
     }
 
-    fn should_render(&self, app: &AppContext) -> bool {
+    fn should_render(&self, _app: &AppContext) -> bool {
         // Builds without a telemetry config (e.g. OpenWarp) cannot ship
         // telemetry, so the toggle would be a no-op. Hide it in that case.
         if !ChannelState::is_telemetry_available() {
             return false;
         }
-        let privacy_settings = PrivacySettings::as_ref(app);
-        !privacy_settings.is_telemetry_force_enabled()
+        true
     }
 
     fn render(
@@ -1464,12 +1464,21 @@ impl SettingsWidget for AppAnalyticsWidget {
             .as_ref(app)
             .get_ugc_collection_enablement_setting();
 
-        let (is_toggleable, is_checked) = match org_setting {
-            UgcCollectionEnablementSetting::Enable => (false, true),
-            UgcCollectionEnablementSetting::Disable => (false, false),
-            UgcCollectionEnablementSetting::RespectUserSetting => {
-                (true, privacy_settings.is_telemetry_enabled)
+        let (is_toggleable, is_checked) = match privacy_settings.organization_telemetry_policy() {
+            OrganizationTelemetryPolicy::Unknown => (false, false),
+            OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Enabled) => {
+                (false, true)
             }
+            OrganizationTelemetryPolicy::Enforced(TelemetryEnablementSetting::Disabled) => {
+                (false, false)
+            }
+            OrganizationTelemetryPolicy::Unmanaged => match org_setting {
+                UgcCollectionEnablementSetting::Enable => (false, true),
+                UgcCollectionEnablementSetting::Disable => (false, false),
+                UgcCollectionEnablementSetting::RespectUserSetting => {
+                    (true, privacy_settings.is_telemetry_enabled)
+                }
+            },
         };
 
         let zdr_label_component = if self.should_show_zdr_badge(app) {
@@ -1598,14 +1607,13 @@ impl SettingsWidget for CrashReportsWidget {
         "telemetry crash reports stability data collection"
     }
 
-    fn should_render(&self, app: &AppContext) -> bool {
+    fn should_render(&self, _app: &AppContext) -> bool {
         // Builds without a crash reporting config (e.g. OpenWarp) cannot ship
         // crash reports, so the toggle would be a no-op. Hide it in that case.
         if !ChannelState::is_crash_reporting_available() {
             return false;
         }
-        let privacy_settings = PrivacySettings::as_ref(app);
-        !privacy_settings.is_telemetry_force_enabled()
+        true
     }
 
     fn render(
@@ -1685,8 +1693,7 @@ impl SettingsWidget for CloudConversationStorageWidget {
             return false;
         }
 
-        let privacy_settings = PrivacySettings::as_ref(app);
-        !privacy_settings.is_telemetry_force_enabled()
+        true
     }
 
     fn render(
