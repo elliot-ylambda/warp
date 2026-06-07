@@ -90,7 +90,6 @@ use axum::{Json, Router};
 pub use bridge::LocalControlBridge;
 use chrono::Duration;
 use futures::channel::oneshot;
-use instant::Instant;
 use permissions::{ensure_action_allowed, ensure_feature_enabled, ensure_protocol_version};
 #[cfg(unix)]
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -380,20 +379,9 @@ async fn handle_credential_broker_connection(
                 )
             })?;
             match serde_json::from_slice::<CredentialRequest>(&bytes) {
-                Ok(request) => {
-                    let action = request.action;
-                    let started = Instant::now();
-                    let response = issue_credential(&state, request)
-                        .await
-                        .and_then(|credential| serialize_credential_broker_response(&credential));
-                    log::debug!(
-                        "warpctrl timing phase=server.credential_total action={} elapsed_ms={:.3} success={}",
-                        action.as_str(),
-                        started.elapsed().as_secs_f64() * 1_000.0,
-                        response.is_ok()
-                    );
-                    response
-                }
+                Ok(request) => issue_credential(&state, request)
+                    .await
+                    .and_then(|credential| serialize_credential_broker_response(&credential)),
                 Err(err) => Err(ControlError::with_details(
                     ErrorCode::InvalidRequest,
                     "failed to decode local-control credential request",
@@ -477,24 +465,19 @@ async fn issue_credential(
             ),
         ));
     }
-    let action = request.action;
-    let policy_started = Instant::now();
-    let policy_result = state
+    state
         .bridge_spawner
-        .spawn(move |_, ctx| ensure_action_allowed(action, ctx))
-        .await;
-    log::debug!(
-        "warpctrl timing phase=server.credential_policy_check action={} elapsed_ms={:.3} success={}",
-        action.as_str(),
-        policy_started.elapsed().as_secs_f64() * 1_000.0,
-        matches!(&policy_result, Ok(Ok(())))
-    );
-    policy_result.map_err(|_| {
-        ControlError::new(
-            ErrorCode::BridgeUnavailable,
-            "local-control app bridge is unavailable",
-        )
-    })??;
+        .spawn({
+            let action = request.action;
+            move |_, ctx| ensure_action_allowed(action, ctx)
+        })
+        .await
+        .map_err(|_| {
+            ControlError::new(
+                ErrorCode::BridgeUnavailable,
+                "local-control app bridge is unavailable",
+            )
+        })??;
     let auth_token = AuthToken::generate();
     let grant = CredentialGrant::new(
         state.instance_id.clone(),
@@ -594,12 +577,10 @@ async fn handle_control_request(
         }
     };
     let request_id = request.request_id;
-    let action = request.action.kind;
     let requires_confirmation = request.action.kind.metadata().requires_user_confirmation;
     if requires_confirmation {
         return handle_close_confirmation_request(state, request, auth_token, grant).await;
     }
-    let dispatch_started = Instant::now();
     let response = match state
         .bridge_spawner
         .spawn(move |bridge, ctx| bridge.handle_request(request, grant, ctx))
@@ -614,12 +595,6 @@ async fn handle_control_request(
             ),
         ),
     };
-    log::debug!(
-        "warpctrl timing phase=server.bridge_dispatch action={} elapsed_ms={:.3} success={}",
-        action.as_str(),
-        dispatch_started.elapsed().as_secs_f64() * 1_000.0,
-        matches!(&response.response, ControlResponse::Ok { .. })
-    );
     let status = match &response.response {
         ControlResponse::Ok { .. } => StatusCode::OK,
         ControlResponse::Error { .. } => StatusCode::BAD_REQUEST,

@@ -15,7 +15,6 @@ use commands::{
     run_tab_command, run_theme_command, run_window_command,
 };
 use completions::generate_completions_to_stdout;
-use instant::Instant;
 use output::write_control_error;
 
 use crate::agent::OutputFormat;
@@ -865,11 +864,8 @@ pub fn run_and_exit(args: ControlArgs) -> ! {
 }
 
 fn run_exit_code(args: ControlArgs) -> u8 {
-    let started = Instant::now();
     let output_format = args.output_format;
-    let result = run_inner(args);
-    local_control::timing::emit_result("cli.command_total", started.elapsed(), result.is_ok());
-    match result {
+    match run_inner(args) {
         Ok(()) => 0,
         Err(error) => {
             if let Err(write_error) = write_control_error(&error, output_format) {

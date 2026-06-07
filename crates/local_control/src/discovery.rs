@@ -32,7 +32,6 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 #[cfg(windows)]
 use command::blocking::Command;
-use instant::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{ActionMetadata, ControlError, ErrorCode, PROTOCOL_VERSION};
@@ -280,17 +279,10 @@ pub fn discovery_dir() -> PathBuf {
 /// The ping follows the normal broker-to-HTTP flow and verifies the responding
 /// app's instance ID, so a live PID and parseable record alone are insufficient.
 pub fn list_instances() -> Vec<InstanceRecord> {
-    let started = Instant::now();
-    let instances = list_instances_from_dir(&discovery_dir())
+    list_instances_from_dir(&discovery_dir())
         .into_iter()
         .filter(|record| crate::client::probe_instance(record).is_ok())
-        .collect::<Vec<_>>();
-    crate::timing::emit_count(
-        "discovery.authenticated_probes",
-        started.elapsed(),
-        instances.len(),
-    );
-    instances
+        .collect()
 }
 
 /// Parses structurally valid candidate records and prunes records with dead PIDs.
@@ -299,9 +291,7 @@ pub fn list_instances() -> Vec<InstanceRecord> {
 /// need invokable instances should use [`list_instances`] so candidates also
 /// pass the authenticated probe.
 pub fn list_instances_from_dir(dir: &Path) -> Vec<InstanceRecord> {
-    let started = Instant::now();
     let Ok(entries) = fs::read_dir(dir) else {
-        crate::timing::emit_count("discovery.scan", started.elapsed(), 0);
         return Vec::new();
     };
     let mut records = Vec::new();
@@ -328,7 +318,6 @@ pub fn list_instances_from_dir(dir: &Path) -> Vec<InstanceRecord> {
         records.push(record);
     }
     records.sort_by_key(|record| record.started_at);
-    crate::timing::emit_count("discovery.scan", started.elapsed(), records.len());
     records
 }
 

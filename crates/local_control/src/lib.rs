@@ -10,7 +10,6 @@ pub mod discovery;
 pub mod protocol;
 pub mod selection;
 pub mod selectors;
-pub mod timing;
 
 pub use auth::{AuthToken, CredentialGrant, CredentialRequest, ScopedCredential};
 pub use catalog::{ActionImplementationStatus, ActionKind, ActionMetadata, TargetScope};
