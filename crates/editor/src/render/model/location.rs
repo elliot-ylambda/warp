@@ -130,10 +130,9 @@ impl RenderState {
         y: Pixels,
         options: &HitTestOptions,
     ) -> Location {
-        let content_y = (y + self.viewport.scroll_top() - self.top_inset()).max(Pixels::zero());
         self.render_coordinates_to_location(
             (x + self.viewport.scroll_left()).max(Pixels::zero()),
-            content_y,
+            (y + self.viewport.scroll_top()).max(Pixels::zero()),
             options,
         )
     }

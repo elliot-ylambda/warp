@@ -157,7 +157,6 @@ fn set_viewport_lines(editor: &ViewHandle<CodeEditorView>, lines: usize, app: &m
                 viewport_size: Vector2F::new(800.0, line_height * lines as f32),
                 needs_layout: false,
             },
-            0.,
             ctx,
         );
     });

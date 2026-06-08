@@ -1467,13 +1467,13 @@ fn test_debounced_resizes() {
 
         // Simulate several resizes, spread across updates.
         render_state.update(&mut app, |render_state, ctx| {
-            render_state.set_viewport_size(size_info, 0., ctx)
+            render_state.set_viewport_size(size_info, ctx)
         });
         render_state.update(&mut app, |render_state, ctx| {
-            render_state.set_viewport_size(size_info, 0., ctx)
+            render_state.set_viewport_size(size_info, ctx)
         });
         render_state.update(&mut app, |render_state, ctx| {
-            render_state.set_viewport_size(size_info, 0., ctx)
+            render_state.set_viewport_size(size_info, ctx)
         });
 
         // The resizes should lead to a single re-layout.
@@ -1490,7 +1490,7 @@ fn test_debounced_resizes() {
         // Resize again after the debounce period.
         Timer::after(DEBOUNCED_RESIZE_PERIOD).await;
         render_state.update(&mut app, |render_state, ctx| {
-            render_state.set_viewport_size(size_info, 0., ctx)
+            render_state.set_viewport_size(size_info, ctx)
         });
 
         // This should cause another re-layout.

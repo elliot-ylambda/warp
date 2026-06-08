@@ -104,14 +104,13 @@ impl ScrollPositionSnapshot {
 
 pub struct ViewportIterator<'a> {
     cursor: sum_tree::Cursor<'a, BlockItem, Height, LayoutSummary>,
-    /// The starting y-offset in scroll coordinates.
-    scroll_start: Pixels,
-    /// The ending y-offset in scroll coordinates (exclusive). This may be past
+    /// The starting y-offset of content to display.
+    content_start: Pixels,
+    /// The ending y-offset of content to display (exclusive). This may be past
     /// the end of the document, but it just needs to be an upper bound.
-    scroll_end: Pixels,
+    content_end: Pixels,
     /// Maximum width the painted object could take in the current viewport.
     max_width: Pixels,
-    top_inset: Pixels,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -346,18 +345,15 @@ impl<'a> ViewportIterator<'a> {
         scroll_top: Pixels,
         viewport_height: Pixels,
         viewport_width: Pixels,
-        top_inset: Pixels,
     ) -> Self {
         let mut cursor = content.cursor();
-        let content_start = (scroll_top - top_inset).max(Pixels::zero());
-        cursor.seek_clamped(&content_start.into(), SeekBias::Left);
+        cursor.seek_clamped(&scroll_top.into(), SeekBias::Left);
 
         Self {
             cursor,
-            scroll_start: scroll_top,
-            scroll_end: scroll_top + viewport_height,
+            content_start: scroll_top,
+            content_end: scroll_top + viewport_height,
             max_width: viewport_width,
-            top_inset,
         }
     }
 }
@@ -367,9 +363,8 @@ impl<'a> Iterator for ViewportIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.cursor.positioned_item()?;
-        let item_scroll_offset = item.start_y_offset + self.top_inset;
         // Stop rendering once the current item is completely outside the viewport.
-        if item_scroll_offset > self.scroll_end {
+        if item.start_y_offset > self.content_end {
             return None;
         }
         self.cursor.next();
@@ -377,8 +372,8 @@ impl<'a> Iterator for ViewportIterator<'a> {
         let spacing = item.item.spacing();
         let content_width = self.max_width - spacing.x_axis_offset();
         let viewport_item = ViewportItem {
-            viewport_offset: item_scroll_offset - self.scroll_start,
-            content_offset: item_scroll_offset,
+            viewport_offset: item.start_y_offset - self.content_start,
+            content_offset: item.start_y_offset,
             content_size: vec2f(content_width.as_f32(), item.item.content_height().as_f32()),
             spacing,
             block_offset: item.start_char_offset,

@@ -28,8 +28,7 @@ use crate::content::text::{
 };
 use crate::render::model::test_utils::{TEST_STYLES, laid_out_paragraph, mock_paragraph};
 use crate::render::model::{
-    Height, HitTestOptions, LayoutSummary, LineCount, Location, RenderedSelection, SoftWrapPoint,
-    TEXT_SPACING,
+    Height, LayoutSummary, LineCount, RenderedSelection, SoftWrapPoint, TEXT_SPACING,
 };
 
 #[test]
@@ -73,69 +72,6 @@ fn test_height() {
             item_count: 4,
         }
     );
-}
-
-#[test]
-fn top_inset_contributes_to_height_and_character_bounds() {
-    let mut model =
-        RenderState::new_for_test(TEST_STYLES.clone(), 40.0.into_pixels(), 60.0.into_pixels());
-    let mut content = SumTree::new();
-    content.push(laid_out_paragraph("ABCDEFG\n", &TEST_STYLES, 40.));
-    model.set_content(content);
-
-    let base_height = model.content_height();
-    let base_bounds = model
-        .character_bounds(CharOffset::from(2))
-        .expect("character should be laid out");
-
-    model.top_inset = 30.0.into_pixels();
-
-    assert_eq!(model.height(), base_height + 30.0.into_pixels());
-    assert_eq!(
-        model
-            .character_bounds(CharOffset::from(2))
-            .expect("character should be laid out"),
-        RectF::new(base_bounds.origin() + vec2f(0., 30.), base_bounds.size())
-    );
-}
-
-#[test]
-fn top_inset_offsets_viewport_items_and_hit_testing() {
-    let mut model =
-        RenderState::new_for_test(TEST_STYLES.clone(), 40.0.into_pixels(), 60.0.into_pixels());
-    let mut content = SumTree::new();
-    content.push(laid_out_paragraph("ABCDEFG\n", &TEST_STYLES, 40.));
-    model.set_content(content);
-    model.top_inset = 30.0.into_pixels();
-
-    let content = model.content();
-    let items = content
-        .viewport_items_with_top_inset(
-            60.0.into_pixels(),
-            model.viewport().width(),
-            Pixels::zero(),
-            model.top_inset,
-        )
-        .map(|(item, _)| (item.viewport_offset, item.content_offset))
-        .collect_vec();
-    assert_eq!(
-        items.first(),
-        Some(&(30.0.into_pixels(), 30.0.into_pixels()))
-    );
-    drop(content);
-
-    let location = model.viewport_coordinates_to_location(
-        20.0.into_pixels(),
-        32.0.into_pixels(),
-        &HitTestOptions::default(),
-    );
-    assert!(matches!(
-        location,
-        Location::Text {
-            char_offset,
-            ..
-        } if char_offset == CharOffset::from(2)
-    ));
 }
 
 #[test]

@@ -102,7 +102,6 @@ pub struct RichTextElement<V: EditorView> {
     display_state: DisplayStateHandle,
     display_options: DisplayOptions,
     max_width: Option<Pixels>,
-    top_inset: Pixels,
     /// We need some information about the view that contains this rich text element,
     /// in order to dispatch actions to it. Using a [`WeakViewHandle`] prevents
     /// reference cycles that make it impossible to dispose of old views, while
@@ -431,7 +430,6 @@ impl<V: EditorView> RichTextElement<V> {
             display_state,
             parent_view,
             display_options,
-            top_inset: Pixels::zero(),
             child_max_z_index: None,
             content_z_index: None,
             max_width: None,
@@ -455,17 +453,6 @@ impl<V: EditorView> RichTextElement<V> {
     pub fn with_max_width(mut self, max_width: Option<Pixels>) -> Self {
         self.max_width = max_width;
         self
-    }
-
-    /// Adds a non-buffer header before the first rendered block.
-    pub fn with_top_inset(mut self, top_inset: impl IntoPixels) -> Self {
-        self.top_inset = top_inset.into_pixels();
-        self
-    }
-
-    /// Sets the non-buffer header inset before the first rendered block.
-    pub fn set_top_inset(&mut self, top_inset: impl IntoPixels) {
-        self.top_inset = top_inset.into_pixels();
     }
 
     /// The size of the viewport.
@@ -501,7 +488,7 @@ impl<V: EditorView> RichTextElement<V> {
             .viewport_size
             .y()
             .into_pixels();
-        let total_size = model.content_height() + self.top_inset;
+        let total_size = model.height();
         if visible_px.approx_eq(total_size, UNIT_MARGIN) {
             // This is a hack copied from the BlockListElement. Due to floating-point
             // errors, total_size and visible_px may be slightly different,
@@ -848,11 +835,10 @@ impl<V: EditorView> RichTextElement<V> {
         let scroll_data = self.vertical_scroll_data(ctx);
 
         let content = model.content();
-        let viewport_items = content.viewport_items_with_top_inset(
+        let viewport_items = content.viewport_items(
             scroll_data.visible_px,
             model.viewport().width(),
             scroll_data.scroll_start,
-            self.top_inset,
         );
 
         let blocks = viewport_items
@@ -1010,12 +996,9 @@ impl<V: EditorView> Element for RichTextElement<V> {
         ) {
             // If we should grow to the max height as more code is added, instead of filling all available space,
             // we should set the max height to be the shorter of the content height and the max height.
-            constraint.max.set_y(
-                constraint
-                    .max
-                    .y()
-                    .min((model.content_height() + self.top_inset).as_f32()),
-            )
+            constraint
+                .max
+                .set_y(constraint.max.y().min(model.height().as_f32()))
         }
 
         let size_info = model
@@ -1059,7 +1042,6 @@ impl<V: EditorView> Element for RichTextElement<V> {
         // views have been laid out.
         let layout_update = ElementUpdate {
             viewport_size: self.viewport_size_info,
-            top_inset: self.top_inset,
             buffer_version: self.buffer_version,
             pending_edits_flushed: self.pending_edits_flushed,
         };
