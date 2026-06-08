@@ -65,7 +65,9 @@ use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
-use super::cloud_agent_auth::{self, AuthContext};
+mod auth;
+
+use self::auth::AuthContext;
 use super::Initialization;
 use crate::channel::ChannelState;
 use crate::tracing::install_no_subscriber;
@@ -200,7 +202,7 @@ fn build_provider(
 /// retained [`AUTH_CONTEXT`] and remain no-ops here.
 pub(super) fn start_auth_refresh(client: Arc<dyn ManagedSecretsClient>, ctx: &mut AppContext) {
     if let Some(auth_context) = AUTH_CONTEXT.get() {
-        cloud_agent_auth::start_refresh_coordinator(auth_context.clone(), client, ctx);
+        auth::start_refresh_coordinator(auth_context.clone(), client, ctx);
     }
 }
 

@@ -4,9 +4,7 @@ use std::time::Duration;
 use tracing::subscriber;
 
 #[cfg(not(target_family = "wasm"))]
-mod cloud_agent_auth;
-#[cfg(not(target_family = "wasm"))]
-mod native;
+mod cloud_agent;
 
 #[cfg(not(target_family = "wasm"))]
 const DEFAULT_EXPORT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -19,7 +17,7 @@ pub fn init() -> anyhow::Result<Initialization> {
     }
 
     #[cfg(not(target_family = "wasm"))]
-    native::init()
+    cloud_agent::init()
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -32,7 +30,7 @@ pub fn start_auth_refresh(
     client: std::sync::Arc<dyn warp_managed_secrets::client::ManagedSecretsClient>,
     ctx: &mut warpui::AppContext,
 ) {
-    native::start_auth_refresh(client, ctx);
+    cloud_agent::start_auth_refresh(client, ctx);
 }
 
 fn install_no_subscriber() -> anyhow::Result<()> {
@@ -48,7 +46,7 @@ fn install_no_subscriber() -> anyhow::Result<()> {
 pub struct Initialization {
     initialization_warning: Option<anyhow::Error>,
     #[cfg(not(target_family = "wasm"))]
-    active_spans: Option<native::ActiveSpanRegistry>,
+    active_spans: Option<cloud_agent::ActiveSpanRegistry>,
     #[cfg(not(target_family = "wasm"))]
     provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
     #[cfg(not(target_family = "wasm"))]
