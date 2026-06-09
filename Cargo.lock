@@ -15454,8 +15454,10 @@ name = "warpui_tui"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "repo_metadata",
  "unicode-segmentation",
  "unicode-width 0.1.14",
+ "warp_util",
  "warpui_core",
 ]
 

@@ -14,3 +14,20 @@ unicode-width.workspace = true
 # feature. Enabling it here is what makes `AppContext`/`App`/`TuiView` resolve to
 # the TUI backend for everything built on top of this crate.
 warpui_core = { workspace = true, features = ["tui"] }
+
+[dev-dependencies]
+# The example/integration tests reuse the real `repo_metadata` model. The
+# `local_fs` feature enables on-disk indexing + filesystem watching so the
+# example can index the directory it is launched in. Because this crate enables
+# `warpui_core/tui`, Cargo feature-unification compiles `repo_metadata` against
+# the TUI backend — proving the model is backend-agnostic.
+repo_metadata = { workspace = true, features = ["local_fs"] }
+warp_util = { workspace = true }
+
+[[example]]
+name = "repo_metadata_probe"
+path = "examples/repo_metadata_probe.rs"
+
+[[example]]
+name = "repo_explorer"
+path = "examples/repo_explorer/main.rs"
