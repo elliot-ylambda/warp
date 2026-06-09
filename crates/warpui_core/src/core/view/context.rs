@@ -3,15 +3,16 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use futures::future::{AbortHandle, Abortable};
-use futures::{Future, FutureExt};
+use futures::Future;
 use pathfinder_geometry::rect::RectF;
 use thiserror::Error;
 
 use super::handle::{AnyViewHandle, ReadView, UpdateView, ViewAsRef, ViewHandle, WeakViewHandle};
-use super::{TypedActionView, View};
+#[cfg(not(feature = "tui"))]
+use super::TypedActionView;
+use super::View;
 use crate::accessibility::AccessibilityContent;
-use crate::core::{Observation, Subscription, SubscriptionKey, TaskCallback};
+use crate::core::{BaseViewContext, Subscription, SubscriptionKey, TaskCallback};
 use crate::fonts::Cache as FontCache;
 use crate::modals::{AlertDialogWithCallbacks, ModalButton, ViewModalCallback};
 use crate::notification::{NotificationSendError, RequestPermissionsOutcome, UserNotification};
@@ -46,6 +47,11 @@ impl<'a, T: View> ViewContext<'a, T> {
             view_id,
             view_type: PhantomData,
         }
+    }
+
+    /// Borrows the backend-neutral [`BaseViewContext`] this facade delegates to.
+    fn base(&mut self) -> BaseViewContext<'_, crate::core::ActiveBackend> {
+        BaseViewContext::new(self.app, self.window_id, self.view_id)
     }
 
     /// Adds a callback that will be invoked immediately after the next frame is drawn.
@@ -112,17 +118,13 @@ impl<'a, T: View> ViewContext<'a, T> {
 
     pub fn focus<S: View>(&mut self, handle: &ViewHandle<S>) {
         let handle: AnyViewHandle = handle.into();
-        self.app.pending_effects.push_back(Effect::Focus {
-            window_id: handle.window_id(self.app),
-            view_id: handle.id(),
-        });
+        let window_id = handle.window_id(self.app);
+        let view_id = handle.id();
+        self.base().focus_view(window_id, view_id);
     }
 
     pub fn focus_self(&mut self) {
-        self.app.pending_effects.push_back(Effect::Focus {
-            window_id: self.window_id,
-            view_id: self.view_id,
-        });
+        self.base().focus_self();
     }
 
     pub fn add_model<S, F>(&mut self, build_model: F) -> ModelHandle<S>
@@ -130,9 +132,10 @@ impl<'a, T: View> ViewContext<'a, T> {
         S: Entity,
         F: FnOnce(&mut ModelContext<S>) -> S,
     {
-        self.app.add_model(build_model)
+        self.base().add_model(build_model)
     }
 
+    #[cfg(not(feature = "tui"))]
     pub fn add_view<S, F>(&mut self, build_view: F) -> ViewHandle<S>
     where
         S: View,
@@ -141,6 +144,7 @@ impl<'a, T: View> ViewContext<'a, T> {
         self.app.add_view(self.window_id, build_view)
     }
 
+    #[cfg(not(feature = "tui"))]
     pub fn add_typed_action_view<V, F>(&mut self, build_view: F) -> ViewHandle<V>
     where
         V: TypedActionView + View,
@@ -151,6 +155,7 @@ impl<'a, T: View> ViewContext<'a, T> {
             .add_typed_action_view_with_parent(self.window_id, build_view, self.view_id)
     }
 
+    #[cfg(not(feature = "tui"))]
     pub fn add_option_view<S, F>(&mut self, build_view: F) -> Option<ViewHandle<S>>
     where
         S: View,
@@ -166,22 +171,17 @@ impl<'a, T: View> ViewContext<'a, T> {
         F: 'static + FnMut(&mut T, ModelHandle<E>, &E::Event, &mut ViewContext<T>),
     {
         let emitter_handle = handle.downgrade();
-        self.app
-            .subscriptions
-            .entry(handle.id())
-            .or_default()
-            .push(Subscription::FromView {
-                window_id: self.window_id,
-                view_id: self.view_id,
-                callback: Box::new(move |view, payload, app, window_id, view_id| {
-                    if let Some(emitter_handle) = emitter_handle.upgrade(app) {
-                        let model = view.downcast_mut().expect("downcast is type safe");
-                        let payload = payload.downcast_ref().expect("downcast is type safe");
-                        let mut ctx = ViewContext::new(app, window_id, view_id);
-                        callback(model, emitter_handle, payload, &mut ctx);
-                    }
-                }),
-            });
+        self.base().add_view_subscription(
+            handle.id(),
+            Box::new(move |view, payload, app, window_id, view_id| {
+                if let Some(emitter_handle) = emitter_handle.upgrade(app) {
+                    let model = view.downcast_mut().expect("downcast is type safe");
+                    let payload = payload.downcast_ref().expect("downcast is type safe");
+                    let mut ctx = ViewContext::new(app, window_id, view_id);
+                    callback(model, emitter_handle, payload, &mut ctx);
+                }
+            }),
+        );
     }
 
     pub fn subscribe_to_view<V, F>(&mut self, handle: &ViewHandle<V>, mut callback: F)
@@ -191,23 +191,17 @@ impl<'a, T: View> ViewContext<'a, T> {
         F: 'static + FnMut(&mut T, ViewHandle<V>, &V::Event, &mut ViewContext<T>),
     {
         let emitter_handle = handle.downgrade();
-
-        self.app
-            .subscriptions
-            .entry(handle.id())
-            .or_default()
-            .push(Subscription::FromView {
-                window_id: self.window_id,
-                view_id: self.view_id,
-                callback: Box::new(move |view, payload, app, window_id, view_id| {
-                    if let Some(emitter_handle) = emitter_handle.upgrade(app) {
-                        let model = view.downcast_mut().expect("downcast is type safe");
-                        let payload = payload.downcast_ref().expect("downcast is type safe");
-                        let mut ctx = ViewContext::new(app, window_id, view_id);
-                        callback(model, emitter_handle, payload, &mut ctx);
-                    }
-                }),
-            });
+        self.base().add_view_subscription(
+            handle.id(),
+            Box::new(move |view, payload, app, window_id, view_id| {
+                if let Some(emitter_handle) = emitter_handle.upgrade(app) {
+                    let model = view.downcast_mut().expect("downcast is type safe");
+                    let payload = payload.downcast_ref().expect("downcast is type safe");
+                    let mut ctx = ViewContext::new(app, window_id, view_id);
+                    callback(model, emitter_handle, payload, &mut ctx);
+                }
+            }),
+        );
     }
 
     pub fn unsubscribe_to_view<V>(&mut self, handle: &ViewHandle<V>)
@@ -358,10 +352,7 @@ impl<'a, T: View> ViewContext<'a, T> {
     /// [^note]: This subscription is on a per-instance basis, not on a per-type
     ///     basis.
     pub fn emit(&mut self, payload: T::Event) {
-        self.app.pending_effects.push_back(Effect::Event {
-            entity_id: self.view_id,
-            payload: Box::new(payload),
-        });
+        self.base().emit_event(Box::new(payload));
     }
 
     /// When all else fails, `emit_a11y_content` comes to the rescue! In our UI framework, some stuff is just an Event, and not an Action. Sometimes a different View emits the event, while another one handles it… So instead of solving this, we simply use `emit_a11y_content(&mut self, content: AccessibilityContent)` on demand, meaning, whenever something meaningful happens and it’s not related to Action or View focusing, we should emit a11y content. A good example for this is announcing that a new update is available.
@@ -408,11 +399,7 @@ impl<'a, T: View> ViewContext<'a, T> {
     /// This is useful to avoid re-entrant view updates (e.g. triggering UI updates
     /// while a view in the responder chain is still mid-update).
     pub fn dispatch_typed_action_deferred<A: Action + 'static>(&mut self, action: A) {
-        self.app.pending_effects.push_back(Effect::TypedAction {
-            window_id: self.window_id,
-            view_id: self.view_id,
-            action: Box::new(action),
-        });
+        self.base().dispatch_typed_action_deferred(Box::new(action));
     }
 
     pub fn observe<S, F>(&mut self, handle: &ModelHandle<S>, mut callback: F)
@@ -420,20 +407,15 @@ impl<'a, T: View> ViewContext<'a, T> {
         S: Entity,
         F: 'static + FnMut(&mut T, ModelHandle<S>, &mut ViewContext<T>),
     {
-        self.app
-            .observations
-            .entry(handle.id())
-            .or_default()
-            .push(Observation::FromView {
-                window_id: self.window_id,
-                view_id: self.view_id,
-                callback: Box::new(move |view, observed_id, app, window_id, view_id| {
-                    let view = view.downcast_mut().expect("downcast is type safe");
-                    let observed = ModelHandle::new(observed_id, &app.ref_counts);
-                    let mut ctx = ViewContext::new(app, window_id, view_id);
-                    callback(view, observed, &mut ctx);
-                }),
-            });
+        self.base().add_view_observation(
+            handle.id(),
+            Box::new(move |view, observed_id, app, window_id, view_id| {
+                let view = view.downcast_mut().expect("downcast is type safe");
+                let observed = ModelHandle::new(observed_id, &app.ref_counts);
+                let mut ctx = ViewContext::new(app, window_id, view_id);
+                callback(view, observed, &mut ctx);
+            }),
+        );
     }
 
     /// Notifies the framework that this view is dirty and needs to be
@@ -444,12 +426,7 @@ impl<'a, T: View> ViewContext<'a, T> {
     /// have `ctx.notify()` called on the child's `ViewContext` in order for the
     /// child to be re-rendered.
     pub fn notify(&mut self) {
-        self.app
-            .pending_effects
-            .push_back(Effect::ViewNotification {
-                window_id: self.window_id,
-                view_id: self.view_id,
-            });
+        self.base().notify();
     }
 
     /// Requests permissions to send desktop notifications. The `on_completion callback` can be invoked to
@@ -480,52 +457,6 @@ impl<'a, T: View> ViewContext<'a, T> {
         let window_id = self.window_id;
         self.app
             .send_desktop_notification(content, view_id, window_id, on_error_callback);
-    }
-
-    /// Schedules a future to run on the main thread, invoking a callback on the
-    /// main thread upon completion.
-    ///
-    /// The callback receives the output of the future, if any, in addition to
-    /// mutable references to the spawning view and its context, allowing for
-    /// dirtying of the view (via [`Self::notify()`]) if appropriate.
-    ///
-    /// This is private to [`ViewContext`] because we shouldn't ever need to
-    /// poll a future on the main thread.  Currently, the only use is by
-    /// [`Self::spawn()`] in order to pass the results of the background task to
-    /// a callback executed on the main thread.
-    ///
-    /// TODO(vorporeal): Determine how best to eliminate this function and move
-    ///     the relevant logic into `spawn()`.
-    fn spawn_local<S, F, U>(&mut self, future: S, callback: F) -> impl Future<Output = ()>
-    where
-        S: 'static + Future,
-        F: 'static + FnOnce(&mut T, S::Output, &mut ViewContext<T>) -> U,
-        U: 'static,
-    {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let task_id = self.app.spawn_local(future);
-
-        self.app.task_callbacks.insert(
-            task_id,
-            TaskCallback::ViewFromFuture {
-                window_id: self.window_id,
-                view_id: self.view_id,
-                callback: Box::new(move |view, output, app, window_id, view_id| {
-                    let view = view.as_any_mut().downcast_mut().expect("this downcast should never fail, as correct typing is statically enforced via the generic parameters on spawn_local");
-                    let output = *output.downcast().expect("this downcast should never fail, as correct typing is statically enforced via the generic parameters on spawn_local");
-                    let result =
-                        callback(view, output, &mut ViewContext::new(app, window_id, view_id));
-                    let _ = tx.send(result);
-                }),
-            },
-        );
-
-        async move {
-            if rx.await.is_err() {
-                log::error!("sender unexpectedly dropped before receiver");
-            }
-        }
     }
 
     /// Schedules a future to run on a background thread, invoking a callback on
@@ -590,40 +521,25 @@ impl<'a, T: View> ViewContext<'a, T> {
         F: 'static + FnOnce(&mut T, <S as Future>::Output, &mut ViewContext<T>),
         A: 'static + FnOnce(&mut T, &mut ViewContext<T>),
     {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let (abort_handle, abort_registration) = AbortHandle::new_pair();
-        self.app
-            .background_executor()
-            .spawn_boxed(Box::pin(async move {
-                let abortable = Abortable::new(future, abort_registration);
-                if tx.send(abortable.await).is_err() {
-                    log::error!("Error sending background task result to main thread",);
-                }
-            }))
-            .detach();
-
-        let future = self.spawn_local(rx, |view, rx_result, ctx| {
-            let output = match rx_result {
-                Ok(output) => output,
-                Err(_) => {
-                    log::error!("sender unexpectedly dropped before receiver");
-                    on_abort(view, ctx);
-                    return;
-                }
-            };
-
-            // Call the appropriate callback based on the output of resolving the future. If the
-            // future returned `Ok`, the future was not aborted so we can call `on_resolve`. If
-            // the future returned `Err`--the future was aborted.
-            match output {
-                Ok(output) => on_resolve(view, output, ctx),
-                Err(_) => on_abort(view, ctx),
-            }
-        });
-
-        let future_id = self.app.register_spawned_future(future.boxed());
-        SpawnedFutureHandle::new(abort_handle, future_id)
+        self.base().spawn_abortable(
+            future,
+            move |view, output, app, window_id, view_id| {
+                let view = view
+                    .as_any_mut()
+                    .downcast_mut()
+                    .expect("statically enforced by spawn_abortable generics");
+                let mut ctx = ViewContext::new(app, window_id, view_id);
+                on_resolve(view, output, &mut ctx);
+            },
+            move |view, app, window_id, view_id| {
+                let view = view
+                    .as_any_mut()
+                    .downcast_mut()
+                    .expect("statically enforced by spawn_abortable generics");
+                let mut ctx = ViewContext::new(app, window_id, view_id);
+                on_abort(view, &mut ctx);
+            },
+        )
     }
 
     /// Schedules a stream to be polled on the main thread, invoking callbacks
@@ -648,35 +564,24 @@ impl<'a, T: View> ViewContext<'a, T> {
         F: 'static + FnMut(&mut T, S::Item, &mut ViewContext<T>),
         G: 'static + FnMut(&mut T, &mut ViewContext<T>),
     {
-        let (tx, rx) = futures::channel::oneshot::channel();
-
-        let task_id = self.app.spawn_stream_local(stream, tx);
-        self.app.task_callbacks.insert(
-            task_id,
-            TaskCallback::ViewFromStream {
-                window_id: self.window_id,
-                view_id: self.view_id,
-                on_item: Box::new(move |view, output, app, window_id, view_id| {
-                    let view = view.as_any_mut().downcast_mut().expect("this downcast should never fail, as correct typing is statically enforced via the generic parameters on spawn_local");
-                    let output = *output.downcast().expect("this downcast should never fail, as correct typing is statically enforced via the generic parameters on spawn_local");
-                    let mut ctx = ViewContext::new(app, window_id, view_id);
-                    on_item(view, output, &mut ctx);
-                }),
-                on_done: Box::new(move |view, app, window_id, view_id| {
-                    let view = view.as_any_mut().downcast_mut().expect("this downcast should never fail, as correct typing is statically enforced via the generic parameters on spawn_local");
-                    let mut ctx = ViewContext::new(app, window_id, view_id);
-                    on_done(view, &mut ctx);
-                }),
+        self.base().spawn_view_stream(
+            stream,
+            move |view, output, app, window_id, view_id| {
+                let view = view
+                    .as_any_mut()
+                    .downcast_mut()
+                    .expect("statically enforced by spawn_stream_local generics");
+                let mut ctx = ViewContext::new(app, window_id, view_id);
+                on_item(view, output, &mut ctx);
             },
-        );
-
-        SpawnedLocalStream::new(
-            async move {
-                if rx.await.is_err() {
-                    log::error!("sender unexpectedly dropped before receiver");
-                }
-            }
-            .boxed_local(),
+            move |view, app, window_id, view_id| {
+                let view = view
+                    .as_any_mut()
+                    .downcast_mut()
+                    .expect("statically enforced by spawn_stream_local generics");
+                let mut ctx = ViewContext::new(app, window_id, view_id);
+                on_done(view, &mut ctx);
+            },
         )
     }
 
@@ -908,6 +813,6 @@ impl<V: View> GetSingletonModelHandle for ViewContext<'_, V> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "tui")))]
 #[path = "context_tests.rs"]
 mod tests;

@@ -17,15 +17,14 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use pathfinder_geometry::rect::RectF;
-use pathfinder_geometry::vector::Vector2F;
 use rustc_hash::FxHashMap;
 
 use super::{
-    autotracking, ActionCallback, Backend, BlurContext, FocusContext, GlobalActionCallback,
-    GlobalShortcut, GuiBackend, GuiPresenterState, Observation, PendingUnsubscribes, RefCounts,
-    Subscription, TaskCallback, TypedActionCallback, ViewType,
+    autotracking, ActionHandlersByName, ActiveBackend, Backend, BlurContext, FocusContext,
+    GlobalActionCallback, GlobalShortcut, GuiPresenterState, Observation, PendingUnsubscribes,
+    RefCounts, Subscription, TaskCallback, TypedActionCallback, ViewType,
 };
-use crate::accessibility::{AccessibilityVerbosity, ActionAccessibilityContent};
+use crate::accessibility::AccessibilityVerbosity;
 use crate::actions::StandardAction;
 use crate::app_focus_telemetry::AppFocusInfo;
 use crate::assets::asset_cache::{AssetCache, AssetHandle, AssetSource, AssetState};
@@ -55,12 +54,12 @@ use crate::r#async::{block_on, FutureId, SpawnableOutput, Timer};
 use crate::util::post_inc;
 use crate::windowing::{self, WindowCallbacks, WindowManager};
 use crate::{
-    assets, rendering, AccessibilityData, Action, AddSingletonModel, AddWindowOptions, AnyModel,
-    AnyModelHandle, AnyView, ApplicationBundleInfo, Clipboard, CursorInfo, Effect, Element, Entity,
-    EntityId, Event, GetSingletonModelHandle, ModelAsRef, ModelContext, ModelHandle,
+    assets, rendering, Action, AddSingletonModel, AddWindowOptions, AnyModel, AnyModelHandle,
+    ApplicationBundleInfo, Clipboard, CursorInfo, Effect, Entity, EntityId, Event,
+    GetSingletonModelHandle, ModelAsRef, ModelContext, ModelHandle,
     NextNewWindowsHasThisWindowsBoundsUponClose, Presenter, ReadModel, ReadView, Scene,
-    SingletonEntity, SpawnedFuture, TaskId, TypedActionView, UpdateModel, UpdateView, View,
-    ViewAsRef, ViewContext, ViewHandle, WindowId, WindowInvalidation, ZoomFactor,
+    SingletonEntity, SpawnedFuture, TaskId, UpdateModel, UpdateView, View, ViewAsRef, ViewContext,
+    ViewHandle, WindowId, WindowInvalidation, ZoomFactor,
 };
 
 lazy_static! {
@@ -68,7 +67,7 @@ lazy_static! {
 }
 
 #[derive(Clone)]
-pub struct App(Rc<RefCell<AppContext>>);
+pub struct App(pub(super) Rc<RefCell<AppContext>>);
 
 impl App {
     pub fn test<A: assets::AssetProvider, T: 'static, F: Future<Output = T> + 'static>(
@@ -162,19 +161,6 @@ impl App {
         self.0
             .borrow_mut()
             .on_window_invalidated(window_id, callback);
-    }
-
-    /// Adds an action with a given handler that is executed when the action is dispatched. The
-    /// action handler should return whether the action was handled. If it returns false this means
-    /// a parent view that listens on the same action name will receive the action.
-    pub fn add_action<S, V, T, F>(&self, name: S, handler: F)
-    where
-        S: Into<String>,
-        V: View,
-        T: Any,
-        F: 'static + FnMut(&mut V, &T, &mut ViewContext<V>) -> bool,
-    {
-        self.0.borrow_mut().add_action(name, handler);
     }
 
     pub fn add_global_action<S, T, F>(&self, name: S, handler: F)
@@ -294,38 +280,6 @@ impl App {
         self.0.borrow().get_singleton_model_handle()
     }
 
-    pub fn add_window_with_bounds<T, F>(
-        &mut self,
-        style: WindowStyle,
-        bounds: WindowBounds,
-        build_root_view: F,
-    ) -> (WindowId, ViewHandle<T>)
-    where
-        T: View + TypedActionView,
-        F: FnOnce(&mut ViewContext<T>) -> T,
-    {
-        self.0.borrow_mut().add_window(
-            AddWindowOptions {
-                window_style: style,
-                window_bounds: bounds,
-                ..Default::default()
-            },
-            build_root_view,
-        )
-    }
-
-    pub fn add_window<T, F>(
-        &mut self,
-        style: WindowStyle,
-        build_root_view: F,
-    ) -> (WindowId, ViewHandle<T>)
-    where
-        T: View + TypedActionView,
-        F: FnOnce(&mut ViewContext<T>) -> T,
-    {
-        self.add_window_with_bounds(style, WindowBounds::Default, build_root_view)
-    }
-
     pub fn window_ids(&self) -> Vec<WindowId> {
         self.0.borrow().window_ids().collect()
     }
@@ -336,48 +290,6 @@ impl App {
 
     pub fn root_view_id(&self, window_id: WindowId) -> Option<EntityId> {
         self.0.borrow().root_view_id(window_id)
-    }
-
-    pub fn add_view<T, F>(&mut self, window_id: WindowId, build_view: F) -> ViewHandle<T>
-    where
-        T: View,
-        F: FnOnce(&mut ViewContext<T>) -> T,
-    {
-        let mut state = self.0.borrow_mut();
-        state.pending_flushes += 1;
-        let handle = state.add_view(window_id, build_view);
-        state.flush_effects();
-        handle
-    }
-
-    pub fn add_typed_action_view<V, F>(
-        &mut self,
-        window_id: WindowId,
-        build_view: F,
-    ) -> ViewHandle<V>
-    where
-        V: TypedActionView + View,
-        F: FnOnce(&mut ViewContext<V>) -> V,
-    {
-        self.0
-            .borrow_mut()
-            .add_typed_action_view(window_id, build_view)
-    }
-
-    pub fn add_option_view<T, F>(
-        &mut self,
-        window_id: WindowId,
-        build_view: F,
-    ) -> Option<ViewHandle<T>>
-    where
-        T: View,
-        F: FnOnce(&mut ViewContext<T>) -> Option<T>,
-    {
-        let mut state = self.0.borrow_mut();
-        state.pending_flushes += 1;
-        let handle = state.add_option_view(window_id, build_view);
-        state.flush_effects();
-        handle
     }
 
     pub fn read<T, F: FnOnce(&AppContext) -> T>(&self, callback: F) -> T {
@@ -588,7 +500,7 @@ pub struct AppContextImpl<B: Backend> {
     ////////////////////////////////
     // Fields from MutableAppContext
     ////////////////////////////////
-    actions: HashMap<TypeId, HashMap<String, Vec<Box<ActionCallback>>>>,
+    pub(super) actions: HashMap<TypeId, ActionHandlersByName<B>>,
     /// Map of typed actions to their internal handler functions
     ///
     /// We use a nested HashMap to key on both the ActionType and the ViewType, which allows us to
@@ -596,7 +508,7 @@ pub struct AppContextImpl<B: Backend> {
     ///
     /// Safety Note: The `TypedActionCallback` must only be called with parameters that match the
     /// type keys, as it requires the values to appropriately downcast.
-    typed_actions: HashMap<ActionType, HashMap<ViewType, Box<TypedActionCallback>>>,
+    pub(super) typed_actions: HashMap<ActionType, HashMap<ViewType, Box<TypedActionCallback<B>>>>,
     /// Backend-specific presentation state, hoisted into [`Backend::Presenter`] so
     /// the generic core never names a GUI-only presenter/position-cache/
     /// invalidation type. GUI: [`GuiPresenterState`].
@@ -626,7 +538,7 @@ pub struct AppContextImpl<B: Backend> {
     window_last_mouse_moved_event: HashMap<WindowId, Rc<RefCell<Option<Event>>>>,
     foreground: Rc<executor::Foreground>,
     background: Arc<executor::Background>,
-    pub(super) task_callbacks: HashMap<usize, TaskCallback>,
+    pub(super) task_callbacks: HashMap<usize, TaskCallback<B>>,
     /// Callbacks that trigger a view redraw on a delay
     /// We store references in case we need to cancel them.
     /// The map key is the timer id returned by EventContext.notify_after
@@ -638,7 +550,7 @@ pub struct AppContextImpl<B: Backend> {
     #[cfg(test)]
     task_done: (async_channel::Sender<usize>, async_channel::Receiver<usize>),
     pub(super) pending_effects: VecDeque<Effect>,
-    pending_flushes: usize,
+    pub(super) pending_flushes: usize,
     flushing_effects: bool,
     app_focus_info: AppFocusInfo,
     #[allow(clippy::type_complexity)]
@@ -715,7 +627,9 @@ pub struct AppContextImpl<B: Backend> {
 /// never mention `B`. A build is GUI **xor** TUI; the TUI instantiation is added
 /// in a later milestone.
 #[cfg(not(feature = "tui"))]
-pub type AppContext = AppContextImpl<GuiBackend>;
+pub type AppContext = AppContextImpl<super::GuiBackend>;
+#[cfg(feature = "tui")]
+pub type AppContext = AppContextImpl<super::TuiBackend>;
 
 impl AppContext {
     pub(crate) fn new(
@@ -1195,105 +1109,6 @@ impl AppContext {
         self.before_open_url_callback = Box::new(handler);
     }
 
-    /// Internal helper method to store the handler for a `TypedActionView` being registered
-    ///
-    /// Creates a handler which will dispatch to `TypedActionView::handle_action` for the given
-    /// View + Action combination.
-    fn add_typed_action<V>(&mut self)
-    where
-        V: TypedActionView + View,
-    {
-        let handler = Box::new(
-            |view: &mut dyn AnyView,
-             action: &dyn Any,
-             app: &mut AppContext,
-             window_id: WindowId,
-             view_id: EntityId| {
-                let is_screen_reader_enabled = app
-                    .platform_delegate
-                    .is_screen_reader_enabled()
-                    .unwrap_or(false);
-                // Safety: The handler is stored in a map keyed on both the ActionType and the
-                // ViewType, so we will only call it if both match, making the downcasts safe
-                let action = action
-                    .downcast_ref()
-                    .expect("Handlers are hashed by action type");
-                let view = view
-                    .as_any_mut()
-                    .downcast_mut()
-                    .expect("Handlers are hashed by view type");
-                let mut ctx = ViewContext::new(app, window_id, view_id);
-                V::handle_action(view, action, &mut ctx);
-                if is_screen_reader_enabled {
-                    match V::action_accessibility_contents(view, action, &mut ctx) {
-                        ActionAccessibilityContent::CustomFn(f) => {
-                            app.platform_delegate.set_accessibility_contents(
-                                f(action).with_verbosity(app.a11y_verbosity),
-                            );
-                        }
-                        ActionAccessibilityContent::Custom(content) => {
-                            app.platform_delegate.set_accessibility_contents(
-                                content.with_verbosity(app.a11y_verbosity),
-                            );
-                        }
-                        ActionAccessibilityContent::Empty => {}
-                    };
-                }
-            },
-        );
-
-        // Insert the action handler for this view into the `typed_actions` hash
-        // We only need to do this once per View type, since the handler is the same for every
-        // instance.
-        self.typed_actions
-            .entry(ActionType::of::<V::Action>())
-            .or_default()
-            .entry(ViewType::of::<V>())
-            .or_insert(handler);
-    }
-
-    pub fn add_action<S, V, T, F>(&mut self, name: S, mut handler: F)
-    where
-        S: Into<String>,
-        V: View,
-        T: Any,
-        F: 'static + FnMut(&mut V, &T, &mut ViewContext<V>) -> bool,
-    {
-        let name = name.into();
-        let name_clone = name.clone();
-        let handler = Box::new(
-            move |view: &mut dyn AnyView,
-                  arg: &dyn Any,
-                  app: &mut AppContext,
-                  window_id: WindowId,
-                  view_id: EntityId| {
-                match arg.downcast_ref() {
-                    Some(arg) => {
-                        let mut ctx = ViewContext::new(app, window_id, view_id);
-                        handler(
-                            view.as_any_mut()
-                                .downcast_mut()
-                                .expect("downcast is type safe"),
-                            arg,
-                            &mut ctx,
-                        )
-                    }
-                    None => {
-                        log::error!("Could not downcast argument for action {name_clone}");
-                        false
-                    }
-                }
-            },
-        );
-
-        self.actions
-            .entry(TypeId::of::<V>())
-            .or_default()
-            .entry(name)
-            .or_default()
-            .push(handler);
-    }
-
     pub fn add_global_action<S, T, F>(&mut self, name: S, mut handler: F)
     where
         S: Into<String>,
@@ -1339,30 +1154,6 @@ impl AppContext {
             .get(&window_id)
             .and_then(|window| window.root_view.as_ref())
             .and_then(|root_view| root_view.clone().downcast::<T>())
-    }
-
-    /// Returns the [`AccessibilityData`] of the focused view, or a parent of that view in its
-    /// responder chain.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub fn focused_view_accessibility_data(
-        &mut self,
-        window_id: WindowId,
-    ) -> Option<AccessibilityData> {
-        let responder_chain = self.get_responder_chain(window_id);
-        for view_id in responder_chain {
-            let window = self.windows.get_mut(&window_id)?;
-            let view = window.views.remove(&view_id)?;
-            let accessibility_data = view.accessibility_data(self, window_id, view_id);
-
-            if let Some(window) = self.windows.get_mut(&window_id) {
-                window.views.insert(view_id, view);
-            }
-
-            if let Some(accessibility_data) = accessibility_data {
-                return Some(accessibility_data);
-            }
-        }
-        None
     }
 
     pub fn dispatch_action_for_view(
@@ -1883,7 +1674,7 @@ impl AppContext {
     /// The "responder chain" is the view hierarchy to match against with bindings.
     /// This prefers the focused view and its ancestors; if no view is focused it
     /// dispatches to the root view.
-    fn get_responder_chain(&self, window_id: WindowId) -> Vec<EntityId> {
+    pub(super) fn get_responder_chain(&self, window_id: WindowId) -> Vec<EntityId> {
         if let Some(focused) = self.focused_view_id(window_id) {
             if let Some(presenter) = self.presenter(window_id) {
                 presenter.borrow().ancestors(focused)
@@ -2242,48 +2033,7 @@ impl AppContext {
             .clone()
     }
 
-    /// Creates a new window with the view returned by the `build_root_view` function as its root
-    /// view.
-    pub fn add_window<T, F>(
-        &mut self,
-        options: AddWindowOptions,
-        build_root_view: F,
-    ) -> (WindowId, ViewHandle<T>)
-    where
-        T: View + TypedActionView,
-        F: FnOnce(&mut ViewContext<T>) -> T,
-    {
-        self.insert_window(options, build_root_view)
-    }
-
-    fn insert_window<T, F>(
-        &mut self,
-        add_window_options: AddWindowOptions,
-        build_root_view: F,
-    ) -> (WindowId, ViewHandle<T>)
-    where
-        T: View + TypedActionView,
-        F: FnOnce(&mut ViewContext<T>) -> T,
-    {
-        let (window_id, _root_view_id) =
-            self.insert_window_internal(None, add_window_options, |window_id, ctx| {
-                ctx.windows.insert(window_id, Window::default());
-                let root_handle = ctx.add_typed_action_view(window_id, build_root_view);
-                let root_view_id = root_handle.id();
-                ctx.windows
-                    .get_mut(&window_id)
-                    .expect("this window was just inserted and should still exist")
-                    .root_view = Some(root_handle.into());
-                root_view_id
-            });
-        (
-            window_id,
-            self.root_view(window_id)
-                .expect("should have just inserted a window and root view"),
-        )
-    }
-
-    fn insert_window_internal<F>(
+    pub(super) fn insert_window_internal<F>(
         &mut self,
         window_id: Option<WindowId>,
         add_window_options: AddWindowOptions,
@@ -2788,30 +2538,27 @@ impl AppContext {
         self.build_scene(window_id, window.as_ctx());
     }
 
-    pub fn add_view<T, F>(&mut self, window_id: WindowId, build_view: F) -> ViewHandle<T>
-    where
-        T: View,
-        F: FnOnce(&mut ViewContext<T>) -> T,
-    {
-        self.add_option_view(window_id, |ctx| Some(build_view(ctx)))
-            .unwrap()
-    }
-
-    pub fn add_option_view<T, F>(
+    /// Shared, backend-neutral body of the optional `add_*_view` flows. Allocates
+    /// the [`EntityId`], runs `build_erased` (which constructs the concrete
+    /// context, invokes the caller's builder, and erases the view into the active
+    /// backend's `Box<B::AnyView>`), inserts it into the window, records
+    /// `view_to_window`, and marks the view for redraw. The typed handle is built
+    /// by `make_handle` before effects are flushed, matching the per-backend
+    /// ordering. Returns `None` if the builder declined.
+    pub(super) fn insert_view_inner<H>(
         &mut self,
         window_id: WindowId,
-        build_view: F,
-    ) -> Option<ViewHandle<T>>
-    where
-        T: View,
-        F: FnOnce(&mut ViewContext<T>) -> Option<T>,
-    {
+        build_erased: impl FnOnce(
+            &mut AppContext,
+            EntityId,
+        ) -> Option<Box<<ActiveBackend as Backend>::AnyView>>,
+        make_handle: impl FnOnce(&mut AppContext, WindowId, EntityId) -> H,
+    ) -> Option<H> {
         let view_id = EntityId::new();
         self.pending_flushes += 1;
-        let mut ctx = ViewContext::new(self, window_id, view_id);
-        let handle = if let Some(view) = build_view(&mut ctx) {
+        let handle = if let Some(view) = build_erased(self, view_id) {
             if let Some(window) = self.windows.get_mut(&window_id) {
-                window.views.insert(view_id, Box::new(view));
+                window.views.insert(view_id, view);
             } else {
                 panic!("Window does not exist");
             }
@@ -2822,7 +2569,7 @@ impl AppContext {
                 .or_default()
                 .updated
                 .insert(view_id);
-            Some(ViewHandle::new(window_id, view_id, &self.ref_counts))
+            Some(make_handle(self, window_id, view_id))
         } else {
             None
         };
@@ -2830,75 +2577,34 @@ impl AppContext {
         handle
     }
 
-    /// Add a view that implements the `TypedAction` trait, including the default parent view
-    ///
-    /// This will create the view as normal as well as register it's `handle_action` method in the
-    /// typed_actions hash.
-    ///
-    /// Note: This is intended to be the replacement for `add_view` with the conversion to typed
-    /// actions (and will subsequently be renamed to `add_view` once that is complete)
-    pub(crate) fn add_typed_action_view_with_parent<V, F>(
+    /// Shared, backend-neutral body of the typed-action `add_*_view` flows.
+    /// Beyond [`Self::insert_view_inner`] it threads the optional structural
+    /// parent (letting the GUI backend mirror it onto its presenter via
+    /// `inform_presenter_of_parent`, a no-op for the TUI backend) and registers
+    /// the typed-action handler via `register_action_handler` before marking the
+    /// view for redraw.
+    pub(super) fn insert_typed_action_view_inner<H>(
         &mut self,
         window_id: WindowId,
-        build_view: F,
-        parent_view_id: EntityId,
-    ) -> ViewHandle<V>
-    where
-        V: TypedActionView + View,
-        F: FnOnce(&mut ViewContext<V>) -> V,
-    {
-        self.add_typed_action_view_internal(window_id, build_view, Some(parent_view_id))
-    }
-
-    /// Add a view that implements the `TypedAction` trait
-    ///
-    /// This will create the view as normal as well as register it's `handle_action` method in the
-    /// typed_actions hash.
-    ///
-    /// Note: This is intended to be the replacement for `add_view` with the conversion to typed
-    /// actions (and will subsequently be renamed to `add_view` once that is complete)
-    pub fn add_typed_action_view<V, F>(
-        &mut self,
-        window_id: WindowId,
-        build_view: F,
-    ) -> ViewHandle<V>
-    where
-        V: TypedActionView + View,
-        F: FnOnce(&mut ViewContext<V>) -> V,
-    {
-        self.add_typed_action_view_internal(window_id, build_view, None)
-    }
-
-    fn add_typed_action_view_internal<V, F>(
-        &mut self,
-        window_id: WindowId,
-        build_view: F,
         parent_view_id: Option<EntityId>,
-    ) -> ViewHandle<V>
-    where
-        V: TypedActionView + View,
-        F: FnOnce(&mut ViewContext<V>) -> V,
-    {
+        build_erased: impl FnOnce(&mut AppContext, EntityId) -> Box<<ActiveBackend as Backend>::AnyView>,
+        inform_presenter_of_parent: impl FnOnce(&mut AppContext, EntityId, EntityId),
+        register_action_handler: impl FnOnce(&mut AppContext),
+        make_handle: impl FnOnce(&mut AppContext, WindowId, EntityId) -> H,
+    ) -> H {
         self.pending_flushes += 1;
 
-        // Build the view and insert it into the window `views` map
         let view_id = EntityId::new();
-        let mut ctx = ViewContext::new(self, window_id, view_id);
-        let view = build_view(&mut ctx);
+        let view = build_erased(self, view_id);
         let window = self
             .windows
             .get_mut(&window_id)
             .expect("Window does not exist");
-        window.views.insert(view_id, Box::new(view));
-
-        // Register in view_to_window mapping
+        window.views.insert(view_id, view);
         self.view_to_window.insert(view_id, window_id);
 
-        // If a parent view ID was provided, add the view as a child of the parent
         if let Some(parent_view_id) = parent_view_id {
-            if let Some(presenter) = self.presenter(window_id) {
-                presenter.borrow_mut().set_parent(view_id, parent_view_id);
-            }
+            inform_presenter_of_parent(self, view_id, parent_view_id);
             self.structural_child_to_parent
                 .insert(view_id, parent_view_id);
             self.structural_parent_to_children
@@ -2907,9 +2613,7 @@ impl AppContext {
                 .insert(view_id);
         }
 
-        // Register the action handler for this view type (if it hasn't already been added)
-        self.add_typed_action::<V>();
-        // Mark the view as needing to be drawn
+        register_action_handler(self);
         self.presentation
             .window_invalidations
             .entry(window_id)
@@ -2917,10 +2621,38 @@ impl AppContext {
             .updated
             .insert(view_id);
 
-        // Create the handle for managing the view lifetime
-        let handle = ViewHandle::new(window_id, view_id, &self.ref_counts);
+        let handle = make_handle(self, window_id, view_id);
         self.flush_effects();
         handle
+    }
+
+    /// Shared, backend-neutral remove/update/reinsert body of the `update_view`
+    /// flows. Removes the erased view from its window, runs `update` against it
+    /// (which downcasts to the concrete view and builds the concrete context),
+    /// then reinserts it.
+    pub(super) fn update_view_inner<S>(
+        &mut self,
+        window_id: WindowId,
+        view_id: EntityId,
+        update: impl FnOnce(&mut Box<<ActiveBackend as Backend>::AnyView>, &mut AppContext) -> S,
+    ) -> S {
+        self.pending_flushes += 1;
+        let mut view = if let Some(window) = self.windows.get_mut(&window_id) {
+            if let Some(view) = window.views.remove(&view_id) {
+                view
+            } else {
+                panic!("Circular view update");
+            }
+        } else {
+            panic!("Window does not exist");
+        };
+
+        let result = update(&mut view, self);
+        if let Some(window) = self.windows.get_mut(&window_id) {
+            window.views.insert(view_id, view);
+        }
+        self.flush_effects();
+        result
     }
 
     /// Transfers a single view from one window to another.
@@ -3128,7 +2860,7 @@ impl AppContext {
         }
     }
 
-    fn flush_effects(&mut self) {
+    pub(super) fn flush_effects(&mut self) {
         self.pending_flushes -= 1;
 
         if !self.flushing_effects && self.pending_flushes == 0 {
@@ -4236,41 +3968,6 @@ impl AppContext {
         }
     }
 
-    pub fn open_view_tree_debug_window(&mut self, target_window_id: WindowId) {
-        let Some(presenter) = self.presenter(target_window_id) else {
-            return;
-        };
-        let Some(root_view_id) = self.root_view_id(target_window_id) else {
-            return;
-        };
-
-        let Some(current_bounds) = self.window_bounds(&target_window_id) else {
-            return;
-        };
-        let size = Vector2F::new(340., 540.);
-        let origin = Vector2F::new(
-            current_bounds.origin().x() + current_bounds.width() - size.x() - 20.,
-            current_bounds.origin().y() + 20.,
-        );
-
-        let options = AddWindowOptions {
-            window_bounds: WindowBounds::ExactPosition(RectF::new(origin, size)),
-            anchor_new_windows_from_closed_position:
-                NextNewWindowsHasThisWindowsBoundsUponClose::No,
-            window_instance: Some("dev.warp.warpui-debug".to_owned()),
-            title: Some("View Tree Debugger".to_owned()),
-            ..Default::default()
-        };
-        self.add_window(options, |ctx| {
-            crate::debug::DebugRootView::new(
-                target_window_id,
-                presenter.borrow().parents(),
-                root_view_id,
-                ctx,
-            )
-        });
-    }
-
     pub fn record_app_focus(&mut self, user_id: Option<String>, anonymous_id: String) {
         self.app_focus_info.record_app_focus(user_id, anonymous_id);
     }
@@ -4342,30 +4039,17 @@ impl UpdateView for AppContext {
         T: View,
         F: FnOnce(&mut T, &mut ViewContext<T>) -> S,
     {
-        self.pending_flushes += 1;
         let window_id = handle.window_id(self);
-        let mut view = if let Some(window) = self.windows.get_mut(&window_id) {
-            if let Some(view) = window.views.remove(&handle.id()) {
-                view
-            } else {
-                panic!("Circular view update");
-            }
-        } else {
-            panic!("Window does not exist");
-        };
-
-        let mut ctx = ViewContext::new(self, window_id, handle.id());
-        let result = update(
-            view.as_any_mut()
-                .downcast_mut()
-                .expect("Downcast is type safe"),
-            &mut ctx,
-        );
-        if let Some(window) = self.windows.get_mut(&window_id) {
-            window.views.insert(handle.id(), view);
-        }
-        self.flush_effects();
-        result
+        let view_id = handle.id();
+        self.update_view_inner(window_id, view_id, |view, app| {
+            let mut ctx = ViewContext::new(app, window_id, view_id);
+            update(
+                view.as_any_mut()
+                    .downcast_mut()
+                    .expect("Downcast is type safe"),
+                &mut ctx,
+            )
+        })
     }
 }
 
@@ -4381,7 +4065,7 @@ impl AddSingletonModel for AppContext {
 
 pub struct ClosedWindowData {
     pub window_id: WindowId,
-    window: Window<GuiBackend>,
+    window: Window<ActiveBackend>,
     subscriptions: HashMap<EntityId, Vec<Subscription>>,
     observations: HashMap<EntityId, Vec<Observation>>,
     view_to_window: HashMap<EntityId, WindowId>,
@@ -4482,31 +4166,6 @@ impl AppContext {
             .get(&window_id)
             .map(|window| window.views.keys().copied().collect())
             .unwrap_or_default()
-    }
-
-    pub fn render_view(&self, window_id: WindowId, view_id: EntityId) -> Result<Box<dyn Element>> {
-        // surfacing the error of a missing window earlier
-        let window = self
-            .windows
-            .get(&window_id)
-            .ok_or_else(|| anyhow!("window not found"))?;
-        window
-            .views
-            .get(&view_id)
-            .map(|view| autotracking::render_view(window_id, view_id, || view.render(self)))
-            .ok_or_else(|| anyhow!("view not found"))
-    }
-
-    pub fn render_views(&self, window_id: WindowId) -> Result<HashMap<EntityId, Box<dyn Element>>> {
-        self.windows
-            .get(&window_id)
-            .map(|w| {
-                w.views
-                    .iter()
-                    .map(|(id, view)| (*id, view.render(self)))
-                    .collect::<HashMap<_, _>>()
-            })
-            .ok_or_else(|| anyhow!("window not found"))
     }
 
     /// Returns the cached element position from the last rendered frame, if there is one.

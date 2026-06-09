@@ -3,8 +3,17 @@ mod app;
 mod autotracking;
 mod backend;
 mod entity;
+#[cfg(not(feature = "tui"))]
+mod gui;
 mod model;
+#[cfg(feature = "tui")]
+mod tui;
+#[cfg(feature = "tui")]
+mod tui_backend;
+#[cfg(feature = "tui")]
+mod tui_view;
 mod view;
+mod view_context_base;
 mod window;
 
 use std::any::{Any, TypeId};
@@ -28,7 +37,15 @@ use futures_util::future::BoxFuture;
 pub use model::*;
 use pathfinder_geometry::rect::RectF;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tui")]
+pub use tui_backend::TuiBackend;
+#[cfg(feature = "tui")]
+pub use tui_view::{
+    AnyTuiView, TuiReadView, TuiTypedActionView, TuiUpdateView, TuiView, TuiViewAsRef,
+    TuiViewContext, TuiViewHandle, WeakTuiViewHandle,
+};
 pub use view::*;
+pub(crate) use view_context_base::BaseViewContext;
 pub use window::*;
 
 use crate::platform::{self, FullscreenState, WindowBounds, WindowStyle};
@@ -133,11 +150,32 @@ impl fmt::Display for TaskId {
 
 pub type OptionalPlatformWindow = Option<Rc<dyn platform::Window>>;
 
-type ActionCallback =
-    dyn FnMut(&mut dyn AnyView, &dyn Any, &mut AppContext, WindowId, EntityId) -> bool;
+/// The active backend marker for this build (GUI by default, TUI under `tui`).
+/// Used by `B`-free types/fields that must name the concrete active backend.
+#[cfg(not(feature = "tui"))]
+pub(crate) type ActiveBackend = GuiBackend;
+#[cfg(feature = "tui")]
+pub(crate) type ActiveBackend = TuiBackend;
 
-type TypedActionCallback =
-    dyn FnMut(&mut dyn AnyView, &dyn Any, &mut AppContext, WindowId, EntityId);
+// The view-callback aliases name the active backend's erased view object via
+// `B::AnyView`, so a single generic alias covers both the GUI (`dyn AnyView`)
+// and TUI (`dyn AnyTuiView`) backends. `AppContextImpl<B>` already stores these
+// registries, so the `B` here is the same backend parameter.
+type ActionCallback<B> = dyn FnMut(
+    &mut <B as Backend>::AnyView,
+    &dyn Any,
+    &mut AppContextImpl<B>,
+    WindowId,
+    EntityId,
+) -> bool;
+
+type TypedActionCallback<B> =
+    dyn FnMut(&mut <B as Backend>::AnyView, &dyn Any, &mut AppContextImpl<B>, WindowId, EntityId);
+
+/// Per-view-type action handlers, keyed by action name. Aliased to keep the
+/// [`AppContextImpl::actions`](app::AppContextImpl) field type within Clippy's
+/// complexity threshold now that the callback is parameterized over `B`.
+type ActionHandlersByName<B> = HashMap<String, Vec<Box<ActionCallback<B>>>>;
 
 type GlobalActionCallback =
     dyn FnMut(&dyn Any, &'static std::panic::Location<'static>, &mut AppContext);
@@ -540,15 +578,28 @@ type ModelFromFutureCallback = dyn FnOnce(&mut dyn Any, Box<dyn Any>, &mut AppCo
 type ModelFromStreamItemCallback = dyn FnMut(&mut dyn Any, Box<dyn Any>, &mut AppContext, EntityId);
 type ModelFromStreamDoneCallback = dyn FnOnce(&mut dyn Any, &mut AppContext, EntityId);
 
-type ViewFromFutureCallback =
-    dyn FnOnce(&mut dyn AnyView, Box<dyn Any>, &mut AppContext, WindowId, EntityId);
+// The view task callbacks name the active backend's erased view via
+// `B::AnyView`, so the GUI and TUI forms share a single generic alias.
+type ViewFromFutureCallback<B> = dyn FnOnce(
+    &mut <B as Backend>::AnyView,
+    Box<dyn Any>,
+    &mut AppContextImpl<B>,
+    WindowId,
+    EntityId,
+);
 
-type ViewFromStreamItemCallback =
-    dyn FnMut(&mut dyn AnyView, Box<dyn Any>, &mut AppContext, WindowId, EntityId);
+type ViewFromStreamItemCallback<B> = dyn FnMut(
+    &mut <B as Backend>::AnyView,
+    Box<dyn Any>,
+    &mut AppContextImpl<B>,
+    WindowId,
+    EntityId,
+);
 
-type ViewFromStreamDoneCallback = dyn FnOnce(&mut dyn AnyView, &mut AppContext, WindowId, EntityId);
+type ViewFromStreamDoneCallback<B> =
+    dyn FnOnce(&mut <B as Backend>::AnyView, &mut AppContextImpl<B>, WindowId, EntityId);
 
-enum TaskCallback {
+enum TaskCallback<B: Backend> {
     ModelFromFuture {
         model_id: EntityId,
         callback: Box<ModelFromFutureCallback>,
@@ -561,13 +612,13 @@ enum TaskCallback {
     ViewFromFuture {
         window_id: WindowId,
         view_id: EntityId,
-        callback: Box<ViewFromFutureCallback>,
+        callback: Box<ViewFromFutureCallback<B>>,
     },
     ViewFromStream {
         window_id: WindowId,
         view_id: EntityId,
-        on_item: Box<ViewFromStreamItemCallback>,
-        on_done: Box<ViewFromStreamDoneCallback>,
+        on_item: Box<ViewFromStreamItemCallback<B>>,
+        on_done: Box<ViewFromStreamDoneCallback<B>>,
     },
 }
 
@@ -669,6 +720,6 @@ impl<T> RequestState<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "tui")))]
 #[path = "mod_tests.rs"]
 mod tests;
