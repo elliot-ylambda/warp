@@ -70,6 +70,9 @@ pub(crate) struct TourStopResult {
     pub copy: String,
     pub steps: Vec<TourStepResult>,
     pub keybindings: Vec<KeybindingSummary>,
+    /// Panes created by this stop's surface opens (e.g. settings splits).
+    /// Tour-created state: pass these to `tour finish` for cleanup.
+    pub created_pane_ids: Vec<String>,
     pub anchor_refocused: bool,
 }
 
@@ -231,7 +234,7 @@ fn create_tour_pane(
     tour_pane
 }
 
-fn list_pane_ids(invoker: &dyn ActionInvoker) -> Result<Vec<String>, ControlError> {
+pub(crate) fn list_pane_ids(invoker: &dyn ActionInvoker) -> Result<Vec<String>, ControlError> {
     let data = invoker.invoke(
         ActionKind::PaneList,
         empty_params(),
@@ -288,10 +291,15 @@ pub(crate) fn run_stop_steps(
     anchor_pane: &str,
 ) -> TourStopResult {
     let mut steps = Vec::new();
+    let panes_before = stop
+        .may_create_panes()
+        .then(|| list_pane_ids(invoker).ok())
+        .flatten();
     for spec in stop.surfaces() {
         let (step, result) = open_surface(invoker, spec, tour_pane);
         steps.push(TourStepResult::from_result(step, &result));
     }
+    let created_pane_ids = created_panes_since(invoker, panes_before);
     let (keybindings, keybinding_step) = resolve_stop_keybindings(invoker, stop);
     if let Some(step) = keybinding_step {
         steps.push(step);
@@ -311,8 +319,29 @@ pub(crate) fn run_stop_steps(
         copy: stop.copy(),
         steps,
         keybindings,
+        created_pane_ids,
         anchor_refocused,
     }
+}
+
+/// Best-effort diff of pane ids against a pre-stop snapshot. Returns the
+/// panes that appeared, or nothing when no snapshot was taken or a listing
+/// failed.
+pub(crate) fn created_panes_since(
+    invoker: &dyn ActionInvoker,
+    panes_before: Option<Vec<String>>,
+) -> Vec<String> {
+    let Some(panes_before) = panes_before else {
+        return Vec::new();
+    };
+    let Ok(panes_after) = list_pane_ids(invoker) else {
+        return Vec::new();
+    };
+    let panes_before: HashSet<String> = panes_before.into_iter().collect();
+    panes_after
+        .into_iter()
+        .filter(|pane| !panes_before.contains(pane))
+        .collect()
 }
 
 /// Resolves keybindings relevant to a stop by filtering `keybinding.list`.
@@ -395,7 +424,7 @@ pub(crate) fn restore_theme_steps(
 /// tour-created targets.
 pub(crate) fn finish_session(
     invoker: &dyn ActionInvoker,
-    tour_pane: Option<&str>,
+    tour_panes: &[String],
     tour_tabs: &[String],
     theme: Option<&ThemeStateResult>,
 ) -> TourFinishResult {
@@ -403,7 +432,7 @@ pub(crate) fn finish_session(
     if let Some(theme) = theme {
         steps.extend(restore_theme_steps(invoker, theme));
     }
-    if let Some(tour_pane) = tour_pane {
+    for tour_pane in tour_panes {
         let result = invoker.invoke(
             ActionKind::PaneClose,
             empty_params(),
@@ -494,12 +523,7 @@ pub(super) fn run_finish_command(
             )
         })?;
     let invoker = client_invoker(&args.instance)?;
-    let result = finish_session(
-        &invoker,
-        args.tour_pane.as_deref(),
-        &args.tour_tabs,
-        theme.as_ref(),
-    );
+    let result = finish_session(&invoker, &args.tour_panes, &args.tour_tabs, theme.as_ref());
     emit_finish(&result, output_format)?;
     if !result.steps.is_empty() && result.steps.iter().all(|step| !step.ok) {
         return Err(first_step_error(

@@ -146,7 +146,7 @@ fn parses_tour_runner_and_composite_commands() {
     let ControlCommand::Tour(TourCommand::Finish(finish)) = args.command else {
         panic!("expected tour finish command");
     };
-    assert_eq!(finish.tour_pane.as_deref(), Some("pane_2"));
+    assert_eq!(finish.tour_panes, vec!["pane_2"]);
     assert_eq!(finish.tour_tabs, vec!["tab_1", "tab_2"]);
     assert!(finish.restore_theme.is_some());
 

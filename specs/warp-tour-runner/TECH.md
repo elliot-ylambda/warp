@@ -10,7 +10,7 @@ The guided tour today is agent-orchestrated: the `warp-tour` skill ([`resources/
 - [`crates/local_control/src/client.rs (42-89) @ 7911402d`](https://github.com/warpdotdev/warp/blob/7911402db11d0ff588720003cb9ca42b98bc1250/crates/local_control/src/client.rs#L42-L89) — blocking `send_request`; requests an exact-action scoped credential per call via the owner-authenticated broker.
 - [`crates/local_control/src/catalog.rs (167-296) @ 7911402d`](https://github.com/warpdotdev/warp/blob/7911402db11d0ff588720003cb9ca42b98bc1250/crates/local_control/src/catalog.rs#L167-L296) — the 84-action catalog. Everything the tour needs already exists: `app.active`, `surface.list`, `pane.split`/`pane.list`/`pane.focus`/`pane.close`, `surface.*.open`, `theme.get`/`theme.set`/`theme.system.set`/`theme.light.set`/`theme.dark.set`, `keybinding.get`, `tab.create` (with `tab_type`), `tab.close`, `input.insert`.
 
-Key implication: the entire feature is CLI-side orchestration in `warp_cli`. No app-bridge, protocol, or catalog changes; the security model (one exact-action credential per dispatched action) is untouched (invariant 24).
+Key implication: the feature is almost entirely CLI-side orchestration in `warp_cli`, with one targeted app-side behavior change (§5): pane-targeted settings opens render as pane splits instead of a new Settings tab so tour demos never hide the anchor terminal. No protocol or catalog changes; the security model (one exact-action credential per dispatched action) is untouched (invariant 24).
 
 ## Proposed changes
 All in `crates/warp_cli/src/local_control/`, plus the bundled skill.
@@ -36,7 +36,21 @@ Extend `TourCommand` with `Run(TourRunArgs)`, `Init(TourInitArgs)`, `Stop(TourSt
 ### 4. Skill update (`resources/bundled/skills/warp-tour/SKILL.md`)
 Rewrite the workflow sections to: (a) offer `warpctrl tour run` first by staging it via Ask User Question/input rather than running it (invariant 22); (b) replace the per-stop multi-command choreography with `tour init` → `tour stop <name>` → `tour finish`, consuming the JSON results; (c) keep a short fallback section using the granular commands when `tour init --help` fails (older CLI). The skill shrinks substantially; the safety rules (never submit input, never close pre-existing targets) stay.
 
-### 5. Spec maintenance
+### 5. App-side: settings opens honor pane targets (invariant 13a)
+`Workspace::open_settings_pane` always created a new "Settings" tab, so settings-backed tour stops (keybindings, agents/knowledge settings pages) hid the tour tab entirely. Since settings content is an ordinary pane (`SettingsPane: PaneContent`, already restorable inside arbitrary pane groups), the fix follows the `OpenCodeReviewPanel(PaneViewLocator)` pattern:
+- `app/src/workspace/action.rs` — new `WorkspaceAction::OpenSettingsPaneSplit { locator, section, search_query }`.
+- `app/src/workspace/view.rs` — `open_settings_pane_split`: reuses + focuses the existing per-window settings pane when one exists; otherwise constructs `SettingsPane::new(...)` and `add_pane_sibling`s it below the targeted pane.
+- `app/src/local_control/handlers/app_state.rs` — `surface.settings.open` and `surface.keybindings.open` route to the split action when `target.pane` is set; targetless invocations keep the new-tab behavior.
+
+Cleanup of the split: `tour stop` diffs `pane.list` around settings-backed stops and reports `created_pane_ids`; the runner records them and `tour finish` accepts repeatable `--tour-pane` so they close with the tour pane.
+
+### 6. App-side: Command Palette entry point (invariants 26–28)
+A native launcher so no agent is needed to discover or start the tour:
+- `app/src/workspace/action.rs` — `WorkspaceAction::StartWarpTour`.
+- `app/src/workspace/mod.rs` — editable binding `workspace:start_warp_tour` ("Take the Warp Tour", `Terminal` group), enabled when `FeatureFlag::WarpControlCli` is on.
+- `app/src/workspace/view.rs` — `start_warp_tour`: quotes `std::env::current_exe()` and runs `<exe> --warpctrl tour run` in the active session via `Input::try_execute_command` (the same path command-search execution uses), which surfaces a toast when a command is already running.
+
+### 7. Spec maintenance
 Update `specs/warp-control-cli/README.md` and `TECH.md` only if reviewers want the tour composites mentioned; the action catalog count (84) does not change.
 
 Tradeoff noted: composites could instead be new server-side catalog actions (single credential, single round-trip). Rejected — it grows the allowlisted attack surface and duplicates orchestration in the app bridge for no user-visible gain; per-action credential requests are local and cheap.

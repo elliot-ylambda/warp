@@ -632,9 +632,10 @@ pub struct TourStopArgs {
 /// Arguments for `tour finish`.
 #[derive(Debug, Clone, Args)]
 pub struct TourFinishArgs {
-    /// Tour-created pane to close.
+    /// Tour-created pane to close. Repeatable (tour pane plus any panes
+    /// reported in a stop's `created_pane_ids`).
     #[arg(long = "tour-pane")]
-    pub tour_pane: Option<String>,
+    pub tour_panes: Vec<String>,
 
     /// Tour-created tab to close. Repeatable.
     #[arg(long = "tour-tab")]

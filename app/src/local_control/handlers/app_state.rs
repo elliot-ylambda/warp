@@ -33,9 +33,9 @@ use crate::settings_view::SettingsSection;
 use crate::util::file::external_editor::EditorSettings;
 #[cfg(feature = "local_fs")]
 use crate::util::openable_file_type::{resolve_file_target_to_open_in_warp, EditorLayout};
-#[cfg(feature = "local_fs")]
-use crate::workspace::PaneViewLocator;
-use crate::workspace::{CommandSearchOptions, InitContent, Workspace, WorkspaceAction};
+use crate::workspace::{
+    CommandSearchOptions, InitContent, PaneViewLocator, Workspace, WorkspaceAction,
+};
 
 const MAX_PANE_RESIZE_STEPS: u32 = 1_000;
 
@@ -69,14 +69,7 @@ pub(crate) fn handle(
             target,
             ctx,
         ),
-        ActionKind::SurfaceKeybindingsOpen => surface_workspace_action(
-            instance_id,
-            action,
-            SurfaceDestination::Keybindings,
-            WorkspaceAction::ShowSettingsPage(SettingsSection::Keybindings),
-            target,
-            ctx,
-        ),
+        ActionKind::SurfaceKeybindingsOpen => surface_keybindings_open(instance_id, target, ctx),
         ActionKind::SurfaceWarpDriveOpen => surface_workspace_action(
             instance_id,
             action,
@@ -647,6 +640,16 @@ fn surface_settings_open(
 ) -> Result<serde_json::Value, ControlError> {
     let PageQueryParams { page, query } = decode_params(params)?;
     let section = page.map(settings_section).transpose()?;
+    if target.pane.is_some() {
+        return settings_open_in_pane_split(
+            instance_id,
+            ActionKind::SurfaceSettingsOpen,
+            section,
+            query,
+            target,
+            ctx,
+        );
+    }
     let action = match (section, query) {
         (Some(section), Some(search_query)) => WorkspaceAction::ShowSettingsPageWithSearch {
             search_query,
@@ -666,6 +669,62 @@ fn surface_settings_open(
         target,
         ctx,
     )
+}
+
+fn surface_keybindings_open(
+    instance_id: &Option<InstanceId>,
+    target: &TargetSelector,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    let action = ActionKind::SurfaceKeybindingsOpen;
+    ensure_surface_available(action, SurfaceDestination::Keybindings, ctx)?;
+    if target.pane.is_some() {
+        return settings_open_in_pane_split(
+            instance_id,
+            action,
+            Some(SettingsSection::Keybindings),
+            None,
+            target,
+            ctx,
+        );
+    }
+    workspace_action(
+        instance_id,
+        action,
+        WorkspaceAction::ShowSettingsPage(SettingsSection::Keybindings),
+        target,
+        ctx,
+    )
+}
+
+/// Opens a settings page as a split sibling of the targeted pane so the
+/// terminal next to the target stays visible.
+fn settings_open_in_pane_split(
+    instance_id: &Option<InstanceId>,
+    action_kind: ActionKind,
+    section: Option<SettingsSection>,
+    search_query: Option<String>,
+    target: &TargetSelector,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    let workspace = target_workspace(action_kind, target, ctx)?;
+    activate_target(&workspace, action_kind, target, ctx)?;
+    let pane_group = target_pane_group(action_kind, target, ctx)?;
+    let pane_id = target_pane_id(action_kind, target, &pane_group, ctx)?;
+    workspace.update(ctx, |workspace, ctx| {
+        workspace.handle_action(
+            &WorkspaceAction::OpenSettingsPaneSplit {
+                locator: PaneViewLocator {
+                    pane_group_id: pane_group.id(),
+                    pane_id,
+                },
+                section,
+                search_query,
+            },
+            ctx,
+        );
+    });
+    Ok(ack(instance_id, action_kind))
 }
 
 fn settings_section(page: String) -> Result<SettingsSection, ControlError> {

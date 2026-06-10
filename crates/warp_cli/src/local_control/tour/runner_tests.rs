@@ -69,6 +69,32 @@ fn themes_stop_restores_theme_once_and_cleanup_closes_tour_pane() {
 }
 
 #[test]
+fn settings_stop_created_pane_is_closed_during_cleanup() {
+    let invoker = ScriptedInvoker::default();
+    *invoker.pane_lists.borrow_mut() = vec![
+        serde_json::json!({ "panes": [{ "pane_id": "p1" }] }),
+        serde_json::json!({ "panes": [{ "pane_id": "p1" }, { "pane_id": "p2" }] }),
+        serde_json::json!({ "panes": [{ "pane_id": "p1" }, { "pane_id": "p2" }] }),
+        serde_json::json!({ "panes": [{ "pane_id": "p1" }, { "pane_id": "p2" }, { "pane_id": "p3" }] }),
+    ];
+    let mut input: &[u8] = b"2\n3\n1\n4\n4\n1\n";
+    let mut output = Vec::new();
+    run_tour_loop(&invoker, &mut input, &mut output, None).expect("tour should end cleanly");
+
+    let calls = invoker.calls.borrow();
+    let closed_panes: Vec<String> = calls
+        .iter()
+        .filter(|(action, _, _)| *action == ActionKind::PaneClose)
+        .filter_map(|(_, _, target)| ScriptedInvoker::pane_id_for(target))
+        .collect();
+    assert_eq!(
+        closed_panes,
+        vec!["p2".to_owned(), "p3".to_owned()],
+        "cleanup should close the tour pane and the settings split it created"
+    );
+}
+
+#[test]
 fn eof_triggers_best_effort_cleanup_summary() {
     let invoker = ScriptedInvoker::default();
     let mut input: &[u8] = b"";

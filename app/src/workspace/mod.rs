@@ -1339,6 +1339,15 @@ pub fn init(app: &mut AppContext) {
     .with_mac_key_binding("cmd-shift-M")
     .with_linux_or_windows_key_binding("ctrl-shift-M")
     .with_group(bindings::BindingGroup::WarpAi.as_str())]);
+
+    app.register_editable_bindings([EditableBinding::new(
+        "workspace:start_warp_tour",
+        "Take the Warp Tour",
+        WorkspaceAction::StartWarpTour,
+    )
+    .with_enabled(|| FeatureFlag::WarpControlCli.is_enabled())
+    .with_context_predicate(id!("Workspace"))
+    .with_group(bindings::BindingGroup::Terminal.as_str())]);
 }
 
 fn add_open_setting_pages_as_editable_binding(app: &mut AppContext) {

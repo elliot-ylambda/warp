@@ -14,7 +14,8 @@ fn finish_session_restores_theme_and_closes_only_given_targets() {
         dark_theme: Some("Dracula".to_owned()),
     };
     let tabs = vec!["tab-agent".to_owned()];
-    let result = finish_session(&invoker, Some("p2"), &tabs, Some(&theme));
+    let panes = vec!["p2".to_owned()];
+    let result = finish_session(&invoker, &panes, &tabs, Some(&theme));
     assert!(!result.copy.is_empty());
     assert!(
         result.steps.iter().all(|step| step.ok),
@@ -46,9 +47,27 @@ fn finish_session_restores_theme_and_closes_only_given_targets() {
 #[test]
 fn finish_session_without_targets_or_theme_does_nothing() {
     let invoker = ScriptedInvoker::default();
-    let result = finish_session(&invoker, None, &[], None);
+    let result = finish_session(&invoker, &[], &[], None);
     assert!(result.steps.is_empty());
     assert!(invoker.actions().is_empty());
+}
+
+#[test]
+fn settings_backed_stop_reports_created_panes() {
+    let invoker = ScriptedInvoker::default();
+    let result = run_stop_steps(&invoker, TourStop::Agents, "p2", "p1");
+    assert_eq!(result.created_pane_ids, vec!["p2".to_owned()]);
+
+    let invoker = ScriptedInvoker::default();
+    let result = run_stop_steps(&invoker, TourStop::GlobalSearch, "p2", "p1");
+    assert!(
+        result.created_pane_ids.is_empty(),
+        "non-settings stops should not diff panes"
+    );
+    assert!(
+        !invoker.actions().contains(&ActionKind::PaneList),
+        "non-settings stops should not list panes"
+    );
 }
 
 #[test]

@@ -147,6 +147,17 @@ impl TourStop {
         }
     }
 
+    /// Whether any of this stop's surface opens can create a new pane (for
+    /// example settings pages, which open as a split of the targeted pane).
+    pub(crate) fn may_create_panes(self) -> bool {
+        self.surfaces().iter().any(|spec| {
+            matches!(
+                spec.action,
+                ActionKind::SurfaceSettingsOpen | ActionKind::SurfaceKeybindingsOpen
+            )
+        })
+    }
+
     /// Case-insensitive needles matched against keybinding names and
     /// descriptions to surface shortcuts relevant to this stop.
     pub(crate) fn keybinding_needles(self) -> &'static [&'static str] {

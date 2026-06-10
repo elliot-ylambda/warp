@@ -17,7 +17,8 @@ use serde_json::Value;
 
 use crate::local_control::TourInstanceArgs;
 use crate::local_control::tour::composite::{
-    finish_session, init_session, open_surface, restore_theme_steps, stage_input,
+    created_panes_since, finish_session, init_session, list_pane_ids, open_surface,
+    restore_theme_steps, stage_input,
 };
 use crate::local_control::tour::copy;
 use crate::local_control::tour::invoker::{ActionInvoker, ClientInvoker, pane_target};
@@ -162,6 +163,7 @@ pub(crate) fn run_tour_loop(
         output,
         anchor_pane,
         tour_pane,
+        extra_panes: Vec::new(),
         agent_tab: None,
         saved_theme: init.theme,
         needs_theme_restore: false,
@@ -218,6 +220,7 @@ struct Session<'a> {
     output: &'a mut dyn Write,
     anchor_pane: String,
     tour_pane: String,
+    extra_panes: Vec<String>,
     agent_tab: Option<String>,
     saved_theme: Option<ThemeStateResult>,
     needs_theme_restore: bool,
@@ -330,6 +333,10 @@ impl Session<'_> {
         if stop == TourStop::Themes && self.saved_theme.is_some() {
             self.needs_theme_restore = true;
         }
+        let panes_before = stop
+            .may_create_panes()
+            .then(|| list_pane_ids(self.invoker).ok())
+            .flatten();
         for spec in stop.surfaces() {
             if !spec_available(spec.action, &self.available) {
                 continue;
@@ -346,6 +353,11 @@ impl Session<'_> {
                 ) {
                     set.remove(name);
                 }
+            }
+        }
+        for pane in created_panes_since(self.invoker, panes_before) {
+            if pane != self.tour_pane && !self.extra_panes.contains(&pane) {
+                self.extra_panes.push(pane);
             }
         }
         if let Err(error) = self.focus_anchor() {
@@ -480,8 +492,10 @@ impl Session<'_> {
             None => return self.best_effort_cleanup(),
             Some(0) => {
                 self.say("Closing up — confirm any normal Warp close prompts that appear.")?;
+                let mut tour_panes = vec![self.tour_pane.clone()];
+                tour_panes.extend(self.extra_panes.iter().cloned());
                 let tour_tabs: Vec<String> = self.agent_tab.iter().cloned().collect();
-                let result = finish_session(self.invoker, Some(&self.tour_pane), &tour_tabs, None);
+                let result = finish_session(self.invoker, &tour_panes, &tour_tabs, None);
                 for step in &result.steps {
                     if step.ok {
                         self.say(&format!("  ✓ {}", step.step))?;
@@ -507,12 +521,17 @@ impl Session<'_> {
         if self.needs_theme_restore {
             self.restore_theme()?;
         }
+        let extra_note = if self.extra_panes.is_empty() {
+            String::new()
+        } else {
+            format!(", settings pane(s) {}", self.extra_panes.join(", "))
+        };
         let agent_note = match &self.agent_tab {
             Some(tab) => format!(" and agent tab {tab}"),
             None => String::new(),
         };
         self.say(&format!(
-            "\nTour ended. Still open: tour pane {}{agent_note}. Close them like any other pane/tab when you're done.",
+            "\nTour ended. Still open: tour pane {}{extra_note}{agent_note}. Close them like any other pane/tab when you're done.",
             self.tour_pane
         ))?;
         Ok(())

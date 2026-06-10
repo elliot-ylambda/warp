@@ -277,7 +277,7 @@ use crate::pane_group::{
     self, AIFactPane, AnyPaneContent, ChildAgentOrigin, CodeDiffPane, CodePane, CodeReviewPanelArg,
     Direction as PaneGroupDirection, Direction, EnvironmentManagementPane,
     ExecutionProfileEditorPane, NetworkLogPane, NewTerminalOptions, PaneGroup, PaneId, PanesLayout,
-    TabBarHoverIndex, TerminalPaneId,
+    SettingsPane, TabBarHoverIndex, TerminalPaneId,
 };
 use crate::persistence::ModelEvent;
 use crate::projects::ProjectManagementModel;
@@ -8017,6 +8017,57 @@ impl Workspace {
         );
     }
 
+    /// Opens the settings pane as a split sibling below the given pane,
+    /// keeping the rest of the tab (e.g. a terminal next to the target pane)
+    /// visible. When a settings pane already exists in this window, it is
+    /// reused and focused instead, preserving the one-settings-pane-per-window
+    /// invariant.
+    fn open_settings_pane_split(
+        &mut self,
+        locator: PaneViewLocator,
+        section: Option<SettingsSection>,
+        search_query: Option<&str>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.close_all_overlays(ctx);
+        let settings_pane_manager = SettingsPaneManager::handle(ctx);
+        if let Some(existing) = settings_pane_manager.as_ref(ctx).find_pane(ctx.window_id()) {
+            if let Some(section) = section {
+                self.settings_pane.update(ctx, |settings_pane, ctx| {
+                    settings_pane.set_and_refresh_current_page(section, ctx);
+                    if let Some(search_query) = search_query {
+                        settings_pane.set_search_query(search_query, ctx);
+                    }
+                });
+            }
+            self.focus_pane(existing, ctx);
+            return;
+        }
+        let Some((tab_index, pane_group)) = self
+            .tabs
+            .iter()
+            .enumerate()
+            .find(|(_, tab)| tab.pane_group.id() == locator.pane_group_id)
+            .map(|(index, tab)| (index, tab.pane_group.clone()))
+        else {
+            log::warn!("Tried to open a settings split in a missing tab");
+            return;
+        };
+        let window_id = ctx.window_id();
+        let pane = SettingsPane::new(section.unwrap_or_default(), search_query, window_id, ctx);
+        pane_group.update(ctx, |pane_group, ctx| {
+            pane_group.add_pane_sibling(
+                locator.pane_id,
+                Direction::Down,
+                Box::new(pane) as Box<dyn AnyPaneContent>,
+                true, /* focus_new_pane */
+                ctx,
+            );
+        });
+        self.activate_tab_internal(tab_index, ctx);
+        ctx.notify();
+    }
+
     /// Open a file from the given session as a notebook pane.
     #[cfg(feature = "local_fs")]
     fn open_file_notebook(
@@ -8067,6 +8118,30 @@ impl Workspace {
 
         view.update(ctx, |terminal_view, ctx| {
             terminal_view.attach_path_as_context(&path, ctx);
+        });
+    }
+
+    /// Launches the self-guided Warp tour by executing `tour run` in hidden
+    /// control mode in the active terminal session. Invokes the current
+    /// executable directly so the tour works even when the `warpctrl` wrapper
+    /// is not installed; the tour itself prints enablement guidance when
+    /// Scripting is disabled.
+    fn start_warp_tour(&mut self, ctx: &mut ViewContext<Self>) {
+        let Some(executable) = std::env::current_exe()
+            .ok()
+            .and_then(|path| path.to_str().map(str::to_owned))
+        else {
+            log::warn!("Could not resolve the current executable to start the Warp tour");
+            return;
+        };
+        let Some(input_handle) = self.get_active_input_view_handle(ctx) else {
+            log::warn!("No active terminal input to start the Warp tour in");
+            return;
+        };
+        let command = format!("{} --warpctrl tour run", shell_words::quote(&executable));
+        input_handle.update(ctx, |input, ctx| {
+            input.try_execute_command(&command, ctx);
+            ctx.notify();
         });
     }
 
@@ -22630,6 +22705,12 @@ impl TypedActionView for Workspace {
                 search_query,
                 section,
             } => self.show_settings_with_search(search_query, *section, ctx),
+            OpenSettingsPaneSplit {
+                locator,
+                section,
+                search_query,
+            } => self.open_settings_pane_split(*locator, *section, search_query.as_deref(), ctx),
+            StartWarpTour => self.start_warp_tour(ctx),
             ShowThemeChooser(mode) => self.show_theme_chooser(Some(*mode), ctx),
             ShowThemeChooserForActiveTheme => self.show_theme_chooser_for_active_theme(ctx),
             IncreaseFontSize => self.increase_font_size(ctx),

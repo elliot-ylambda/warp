@@ -233,6 +233,17 @@ pub enum WorkspaceAction {
         search_query: String,
         section: Option<SettingsSection>,
     },
+    /// Opens the settings pane as a split sibling of the given pane instead of
+    /// a new tab. Used by Warp Control when a pane target is supplied so the
+    /// terminal next to the target stays visible.
+    OpenSettingsPaneSplit {
+        locator: PaneViewLocator,
+        section: Option<SettingsSection>,
+        search_query: Option<String>,
+    },
+    /// Launches the self-guided Warp tour (`warpctrl tour run`) in the active
+    /// terminal session, with no agent involvement.
+    StartWarpTour,
     ShowThemeChooser(ThemeChooserMode),
     ShowThemeChooserForActiveTheme,
     IncreaseFontSize,
@@ -868,6 +879,7 @@ impl WorkspaceAction {
             | OpenRepository { .. }
             | SelectTabConfig(_)
             | ToggleVerticalTabsPanel
+            | OpenSettingsPaneSplit { .. }
             | OpenVerticalTabsPanel => true, // actions that actually change a state of the state of user's
             // workspace would most likely require a save, so that if the app gets
             // restarted, the user can continue working
@@ -880,6 +892,7 @@ impl WorkspaceAction {
             | ShowSettings
             | ShowSettingsPage(_)
             | ShowSettingsPageWithSearch { .. }
+            | StartWarpTour
             | ShowThemeChooser(_)
             | ShowThemeChooserForActiveTheme
             | IncreaseFontSize

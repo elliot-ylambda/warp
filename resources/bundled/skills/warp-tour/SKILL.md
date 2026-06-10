@@ -97,14 +97,15 @@ For every stop:
    $WARPCTRL --output-format json tour stop <stop-name> --tour-pane <tour-pane-id> --anchor-pane <anchor-pane-id>
    ```
 2. Emit the returned `copy` verbatim in your response message. Mention any returned `keybindings` naturally (never hard-code a shortcut that wasn't returned).
-3. If individual `steps` failed, cheerfully tell the user that surface isn't available right now, drop the affected stop from future menus, and move on. A failed step never aborts the tour.
-4. The command refocuses the anchor for you. Ask the hands-on task from the stop copy with Ask User Question:
+3. If the result includes `created_pane_ids` (settings pages open as a split below the tour pane), record those IDs — they are tour-created state you must offer to close at cleanup.
+4. If individual `steps` failed, cheerfully tell the user that surface isn't available right now, drop the affected stop from future menus, and move on. A failed step never aborts the tour.
+5. The command refocuses the anchor for you. Ask the hands-on task from the stop copy with Ask User Question:
    - **Done! ✅**
    - **I need a hint 💡**
    - **Skip this one**
    - **End the tour**
-5. If the user asks for help, offer a brief hint (one sentence), rerun the `tour stop` command if the surface needs reopening, then ask again. Never repeat a question they already skipped.
-6. After completion or skip, use Ask User Question:
+6. If the user asks for help, offer a brief hint (one sentence), rerun the `tour stop` command if the surface needs reopening, then ask again. Never repeat a question they already skipped.
+7. After completion or skip, use Ask User Question:
    - **Next stop →**
    - **Back to topic menu**
    - **End the tour**
@@ -130,7 +131,7 @@ If cleanup is chosen, one invocation restores the theme and closes exactly the r
 $WARPCTRL --output-format json tour finish --tour-pane <tour-pane-id> --restore-theme '<saved-theme-json>'
 ```
 
-Add `--tour-tab <id>` for any temporary tab you created. Emit the returned `copy` verbatim. Tell the user to confirm any normal Warp close warnings that appear — that's expected behavior. If a close fails or gets cancelled, cheerfully report exactly what's still open from the `steps`. Never close the anchor or anything that existed before the tour started.
+Add one extra `--tour-pane <id>` per pane recorded from `created_pane_ids`, and `--tour-tab <id>` for any temporary tab you created. Emit the returned `copy` verbatim. Tell the user to confirm any normal Warp close warnings that appear — that's expected behavior. If a close fails or gets cancelled, cheerfully report exactly what's still open from the `steps`. Never close the anchor or anything that existed before the tour started.
 
 If the user declines cleanup, still restore the theme when the themes stop was visited:
 
