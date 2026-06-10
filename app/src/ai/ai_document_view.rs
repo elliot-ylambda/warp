@@ -143,6 +143,23 @@ impl From<PaneEvent> for AIDocumentEvent {
 
 pub const DEFAULT_PLANNING_DOCUMENT_TITLE: &str = "Planning document";
 
+/// State for hosting the orchestration config card as a view zone on the plan
+/// editor (see `crate::ai::document::orchestration_config_zone`).
+#[derive(Default)]
+struct OrchestrationZone {
+    /// The card view. `None` until the conversation has an orchestration
+    /// config for this plan.
+    block: Option<ViewHandle<OrchestrationConfigBlockView>>,
+    /// The size last reserved for the zone. Compared against the desired size
+    /// so the zone is re-reconciled only when it changes.
+    reserved_size: Option<Vector2F>,
+    /// The plan editor render state currently subscribed to for post-layout
+    /// zone re-reconciliation. Each document version owns its own editor
+    /// model, so the render state is replaced (and the old subscription
+    /// dropped) whenever the viewed version changes via `set_editor_model`.
+    render_state: Option<ModelHandle<RenderState>>,
+}
+
 /// Entry for the version history dropdown menu.
 struct VersionMenuEntry {
     version: AIDocumentVersion,
@@ -296,7 +313,7 @@ impl AIDocumentView {
                             // Lazily create the config block view if the
                             // plan sidebar opened before the orchestration
                             // config arrived.
-                            let was_freshly_created = if me.orchestration_config_block.is_none() {
+                            let was_freshly_created = if me.orchestration_zone.block.is_none() {
                                 let conv_id = *cid;
                                 // TODO: introduce DocumentId / PlanId newtypes to make this
                                 // conversion type-safe.
@@ -311,7 +328,7 @@ impl AIDocumentView {
                             // Arm auto-pop for live agent dispatches but
                             // not for restore-hydrated events.
                             if was_freshly_created && !*from_restore {
-                                if let Some(block) = &me.orchestration_config_block {
+                                if let Some(block) = &me.orchestration_zone.block {
                                     block.update(ctx, |block, ctx| {
                                         block.arm_for_fresh_dispatch(ctx);
                                     });
@@ -481,6 +498,7 @@ impl AIDocumentView {
         };
         // Force update the editor view based on the initial document version
         me.refresh(ctx);
+
         // `refresh` early-returns when the document is missing; ensure the
         // initial editor is wired for the orchestration view zone regardless.
         me.observe_editor_render_state(ctx);
