@@ -1968,8 +1968,12 @@ impl AgentDriver {
                 let harness_setup_events = setup_events.clone();
                 let (harness_exit_rx, runner) = setup_events
                     .record_result(SetupStep::ThirdPartyHarnessPreparation, async {
-                        let harness_exit_rx =
-                            Self::setup_harness(harness.as_ref(), &foreground, &harness_setup_events).await?;
+                        let harness_exit_rx = Self::setup_harness(
+                            harness.as_ref(),
+                            &foreground,
+                            &harness_setup_events,
+                        )
+                        .await?;
                         let runner = Self::prepare_harness(
                             &task.prompt,
                             &task.mcp_specs,
@@ -2151,7 +2155,13 @@ impl AgentDriver {
         };
 
         Self::setup_notification_plugin(manager.as_ref(), events).await;
-        Self::setup_platform_plugin(harness_name, manager.as_ref(), requires_platform_plugin, events).await
+        Self::setup_platform_plugin(
+            harness_name,
+            manager.as_ref(),
+            requires_platform_plugin,
+            events,
+        )
+        .await
     }
 
     async fn setup_notification_plugin(
