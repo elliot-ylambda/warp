@@ -76,9 +76,6 @@ impl TerminalView {
                 },
                 move |view, maybe_match, ctx| {
                     if let Some(openable_path) = maybe_match {
-                        // Suggest "Open in Warp" for files that render in the
-                        // notebook viewer (Markdown, and Jupyter when enabled) or
-                        // in the code editor (code files). Plain text is skipped.
                         if renders_in_warp_notebook_viewer(&openable_path.path)
                             || matches!(openable_path.file_type, OpenableFileType::Code)
                         {

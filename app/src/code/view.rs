@@ -278,9 +278,6 @@ impl CodeView {
 
     #[cfg(feature = "local_fs")]
     fn update_markdown_mode_segmented_control(&mut self, ctx: &mut ViewContext<Self>) {
-        // Markdown files always offer the Rendered/Raw toggle; Jupyter notebooks
-        // do too when the feature is enabled, so "Raw" (JSON in CodeView) can
-        // toggle back to the rendered notebook.
         let renders_in_notebook_viewer = self
             .tab_at(self.active_tab_index)
             .and_then(|t| t.location.as_ref())

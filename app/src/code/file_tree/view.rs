@@ -2274,9 +2274,6 @@ impl FileTreeView {
                         let target = if is_jupyter_notebook_file(remote_file_path)
                             && FeatureFlag::JupyterNotebookRendering.is_enabled()
                         {
-                            // Jupyter notebooks render in the notebook viewer
-                            // regardless of the markdown-viewer preference, the
-                            // same way local notebooks do.
                             FileTarget::MarkdownViewer(EditorLayout::SplitPane)
                         } else if is_markdown_file(remote_file_path) {
                             #[cfg(feature = "local_fs")]

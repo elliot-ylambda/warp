@@ -330,10 +330,7 @@ impl FileNotebookView {
 
     /// Reset the rich text contents based on the given file content.
     ///
-    /// For Jupyter notebooks (when the feature is enabled), the JSON is
-    /// converted directly into formatted text via [`RichTextEditorView::reset_with_ipynb`];
-    /// on conversion failure the raw content is shown verbatim so the user never
-    /// sees a blank view. All other files are reset as Markdown.
+    /// For now we put jupyternotebook under a feature flag, will remove once launch
     pub fn set_content(&mut self, content: &str, ctx: &mut ViewContext<Self>) {
         let doc_path = self.file_state.local_path().map(|p| p.to_path_buf());
         let render_as_ipynb =
@@ -727,9 +724,7 @@ impl FileNotebookView {
             .unwrap_or(false)
     }
 
-    /// Whether the open file renders in the notebook viewer with a Rendered/Raw
-    /// header toggle: Markdown always, Jupyter notebooks when the feature flag
-    /// is enabled.
+    /// We show raw/rendered toggle for Jupyter notebook and markdown
     fn shows_markdown_toggle(&self) -> bool {
         self.is_markdown_file()
             || (FeatureFlag::JupyterNotebookRendering.is_enabled()
