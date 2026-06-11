@@ -19,6 +19,8 @@ impl AsyncAssetType for UrlAssetWithoutPersistence {}
 pub struct DataUriAsset;
 impl AsyncAssetType for DataUriAsset {}
 
+const MAX_DATA_URI_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
+
 /// Namespace marker for URL-based async asset sources with persistence.
 ///
 /// This is intentionally separate from `UrlAssetWithoutPersistence` to allow
@@ -53,6 +55,12 @@ pub fn data_uri_source(source: &str) -> Option<AssetSource> {
         .split(';')
         .any(|segment| segment.eq_ignore_ascii_case("base64"))
     {
+        return None;
+    }
+
+    // `source` is untrusted; reject oversized payloads before cloning/decoding
+    // so a crafted image cannot spike memory usage.
+    if payload.len() > MAX_DATA_URI_PAYLOAD_BYTES {
         return None;
     }
 

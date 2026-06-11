@@ -50,3 +50,12 @@ fn data_uri_source_invalid_base64_fails_on_fetch() {
         data_uri_source("data:image/png;base64,not valid base64!").expect("detected as data URI");
     assert!(fetch_bytes(&source).is_err());
 }
+
+#[test]
+fn data_uri_source_rejects_oversized_payload() {
+    // An untrusted, oversized payload must be rejected before it is cloned or
+    // decoded, so it never produces an asset source.
+    let huge = "A".repeat(MAX_DATA_URI_PAYLOAD_BYTES + 1);
+    let source = format!("data:image/png;base64,{huge}");
+    assert!(data_uri_source(&source).is_none());
+}
