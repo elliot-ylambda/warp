@@ -38,9 +38,9 @@ impl From<&proto::PrInfo> for PrInfo {
         PrInfo {
             number: pr_info.number,
             url: pr_info.url.clone(),
-            state: String::new(),
-            draft: false,
-            base_branch: String::new(),
+            state: pr_info.state.clone(),
+            draft: pr_info.draft,
+            base_branch: pr_info.base_branch.clone(),
         }
     }
 }
@@ -442,6 +442,9 @@ impl From<&PrInfo> for proto::PrInfo {
         proto::PrInfo {
             number: pr_info.number,
             url: pr_info.url.clone(),
+            state: pr_info.state.clone(),
+            draft: pr_info.draft,
+            base_branch: pr_info.base_branch.clone(),
         }
     }
 }

@@ -8,6 +8,7 @@ use crate::code_review::diff_state::{
     DiffMetadata, DiffMetadataAgainstBase, DiffMode, DiffState, FileDiff, FileDiffAndContent,
     FileStatusInfo, GitDiffWithBaseContent, GitFileStatus,
 };
+use crate::util::git::PrInfo;
 
 // ── FileStatusInfo path validation (TryFrom) ────────────────────
 
@@ -172,6 +173,23 @@ fn text_file_diff(file_path: &str) -> FileDiff {
         has_hidden_bidi_chars: false,
         size: DiffSize::Normal,
     }
+}
+
+#[test]
+fn pr_info_round_trips_through_proto() {
+    // Guards that the wire format stays 1:1 with the Rust `PrInfo` type — all
+    // fields must survive a round trip, not just `number` and `url`.
+    let pr_info = PrInfo {
+        number: 42,
+        url: "https://github.com/owner/repo/pull/42".to_string(),
+        state: "OPEN".to_string(),
+        draft: true,
+        base_branch: "main".to_string(),
+    };
+
+    let decoded = PrInfo::from(&proto::PrInfo::from(&pr_info));
+
+    assert_eq!(decoded, pr_info);
 }
 
 #[test]
