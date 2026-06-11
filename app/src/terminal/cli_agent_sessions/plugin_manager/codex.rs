@@ -99,7 +99,7 @@ impl CliAgentPluginManager for CodexPluginManager {
         let Ok(codex_dir) = codex_home_dir() else {
             return false;
         };
-        check_installed(&codex_dir)
+        dbg!(check_installed(&codex_dir))
     }
 
     fn needs_update(&self) -> bool {
@@ -154,6 +154,7 @@ impl CliAgentPluginManager for CodexPluginManager {
         if !FeatureFlag::CodexPlugin.is_enabled() {
             return Ok(());
         }
+        log::info!("[PLUGIN_INSTALL] updating codex plugin");
         let mut log = String::new();
         ensure_codex_home_dir()?;
         self.ensure_marketplace(&mut log).await?;
