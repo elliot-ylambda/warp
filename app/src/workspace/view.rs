@@ -24628,8 +24628,8 @@ impl TypedActionView for Workspace {
                     false,
                     None,
                     initial_prompt.clone(),
-                    *destination,
                     vec![],
+                    *destination,
                     Some(PendingConversationHandoff::CloudToLocal),
                     ctx,
                 );
