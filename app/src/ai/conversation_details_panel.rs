@@ -2234,6 +2234,8 @@ impl TypedActionView for ConversationDetailsPanel {
                     );
                     ctx.dispatch_typed_action(&WorkspaceAction::ContinueConversationLocally {
                         conversation_id,
+                        initial_prompt: None,
+                        destination: ForkedConversationDestination::SplitPane,
                     });
                 }
             }
