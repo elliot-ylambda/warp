@@ -15309,7 +15309,7 @@ impl Workspace {
                 FORK_PREFIX,
                 true,
                 title_override.as_deref(),
-                None,
+                Some(PendingConversationHandoff::LocalToCloud),
                 ctx,
             )
         }) {
