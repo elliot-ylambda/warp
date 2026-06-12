@@ -245,11 +245,19 @@ fn handle_callback_connection(mut stream: TcpStream) -> anyhow::Result<Option<Ca
     stream.set_nonblocking(false).ok();
     stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
 
-    let mut buf = [0u8; 8192];
-    let n = stream
-        .read(&mut buf)
-        .context("failed to read the Grok OAuth callback request")?;
-    let request = String::from_utf8_lossy(&buf[..n]);
+    let request = match read_request_head(&mut stream) {
+        Ok(request) => request,
+        // Browsers open speculative/preconnect sockets that never send a
+        // request, and other local processes may probe the port. None of
+        // those are the callback, so keep listening rather than aborting
+        // the whole login over one bad connection.
+        Err(err) => {
+            log::warn!(
+                "Ignoring an unreadable connection to the Grok OAuth callback server: {err}"
+            );
+            return Ok(None);
+        }
+    };
 
     let origin = request_header(&request, "Origin");
 
@@ -318,6 +326,26 @@ fn handle_callback_connection(mut stream: TcpStream) -> anyhow::Result<Option<Ca
     write_response(&mut stream, "200 OK", SUCCESS_HTML, origin.as_deref());
     Ok(Some(CallbackData { code, state }))
 }
+
+/// Reads from the stream until the end of the HTTP request head (the blank
+/// line after the headers), EOF, or the buffer is full. The OAuth parameters
+/// arrive in the request line, so any body is irrelevant.
+fn read_request_head(stream: &mut TcpStream) -> std::io::Result<String> {
+    let mut buf = [0u8; 8192];
+    let mut len = 0;
+    while len < buf.len() {
+        let n = stream.read(&mut buf[len..])?;
+        if n == 0 {
+            break;
+        }
+        len += n;
+        if buf[..len].windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&buf[..len]).into_owned())
+}
+
 fn request_header(request: &str, header_name: &str) -> Option<String> {
     request.lines().skip(1).find_map(|line| {
         let (name, value) = line.split_once(':')?;

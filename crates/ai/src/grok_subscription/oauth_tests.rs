@@ -37,3 +37,48 @@ fn token_response_parses_minimal_and_full() {
     assert_eq!(full.refresh_token.as_deref(), Some("r"));
     assert_eq!(full.expires_in, Some(3600));
 }
+
+#[test]
+fn connection_closed_without_data_is_ignored() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind should succeed");
+    let addr = listener.local_addr().expect("local addr should resolve");
+
+    // Simulates a browser preconnect socket: opened and closed with no request.
+    drop(TcpStream::connect(addr).expect("connect should succeed"));
+
+    let (stream, _) = listener.accept().expect("accept should succeed");
+    let result = handle_callback_connection(stream).expect("empty connection should not error");
+    assert!(result.is_none());
+}
+
+#[test]
+fn callback_request_split_across_writes_is_parsed() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind should succeed");
+    let addr = listener.local_addr().expect("local addr should resolve");
+
+    let client = std::thread::spawn(move || {
+        let mut client = TcpStream::connect(addr).expect("connect should succeed");
+        client
+            .write_all(b"GET /callback?code=abc&st")
+            .expect("first write should succeed");
+        client.flush().expect("flush should succeed");
+        std::thread::sleep(Duration::from_millis(50));
+        client
+            .write_all(b"ate=xyz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .expect("second write should succeed");
+        client.flush().expect("flush should succeed");
+        let mut response = String::new();
+        let _ = client.read_to_string(&mut response);
+        response
+    });
+
+    let (stream, _) = listener.accept().expect("accept should succeed");
+    let data = handle_callback_connection(stream)
+        .expect("split request should not error")
+        .expect("split request should parse as a callback");
+    assert_eq!(data.code, "abc");
+    assert_eq!(data.state, "xyz");
+
+    let response = client.join().expect("client thread should not panic");
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
+}
