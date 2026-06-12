@@ -20,7 +20,6 @@ use crate::workspaces::workspace::{
     BillingCycleUsageData, BillingCycleUsageSummary, Workspace, WorkspaceUid,
 };
 
-/// Three period ends, most recent first (matching the server's summary order).
 fn test_period_ends() -> Vec<DateTime<Utc>> {
     let current_period_end = Utc.with_ymd_and_hms(2026, 6, 13, 0, 0, 0).unwrap();
     (0..3)
@@ -93,8 +92,6 @@ fn opening_period_menu_highlights_current_period_by_default() {
 
         period_menu.read(&app, |menu, _| {
             assert_eq!(menu.items_len(), 3);
-            // No explicit selection means the current (first) period is shown,
-            // so it should be highlighted in the menu.
             assert_eq!(menu.selected_index(), Some(0));
         });
     });

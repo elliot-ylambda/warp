@@ -232,9 +232,6 @@ impl BillingCycleUsageSectionView {
             })
             .collect();
 
-        // `selected_period_end == None` implicitly means the current period
-        // (the first summary), so resolve it to a concrete `period_end` that
-        // matches one of the `SelectPeriod(Some(..))` item actions above.
         let selected_period_end = self
             .selected_period_end
             .or_else(|| data.summaries.first().map(|s| s.period_end));
@@ -242,8 +239,6 @@ impl BillingCycleUsageSectionView {
         self.period_menu
             .update(ctx, |menu: &mut Menu<BillingCycleUsageAction>, ctx| {
                 menu.set_items(items, ctx);
-                // Highlight the period currently being displayed so the open
-                // menu reflects the active selection.
                 if let Some(period_end) = selected_period_end {
                     menu.set_selected_by_action(
                         &BillingCycleUsageAction::SelectPeriod(Some(period_end)),
