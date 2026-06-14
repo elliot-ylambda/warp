@@ -167,6 +167,19 @@ impl Block {
         }
     }
 
+    /// Marks an agent-associated command as stopped by the user.
+    pub fn set_user_control_with_stop_reason(&mut self) {
+        if let InteractionMode::Agent(AgentInteractionMetadata {
+            ref mut long_running_control_state,
+            ..
+        }) = self.interaction_mode
+        {
+            *long_running_control_state = Some(LongRunningCommandControlState::User {
+                reason: UserTakeOverReason::Stop,
+            });
+        }
+    }
+
     /// Returns `true` if agent responses should be hidden in the UI.
     pub fn should_hide_responses(&self) -> bool {
         self.is_active_and_long_running()

@@ -19,7 +19,8 @@ use super::*;
 use crate::ai::agent::conversation::{AIConversation, ConversationStatus};
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::{
-    AIAgentActionId, AIAgentExchange, AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus,
+    AIAgentActionId, AIAgentActionResult, AIAgentActionResultType, AIAgentExchange,
+    AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus, RequestCommandOutputResult,
     UserQueryMode,
 };
 use crate::ai::ambient_agents::AmbientAgentTaskId;
@@ -625,7 +626,6 @@ fn unregister_cli_agent_session_restores_unlocked_input_config() {
 fn clear_buffer_action_in_fullscreen_agent_view_starts_new_conversation() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
-        FeatureFlag::AgentView.set_enabled(true);
 
         let terminal = add_window_with_terminal(&mut app, None);
 
@@ -5213,7 +5213,166 @@ fn inline_agent_view_exits_when_tagged_in_long_running_command_is_tagged_out() {
 }
 
 #[test]
-fn ctrl_c_after_takeover_interrupts_command_without_cancelling_conversation() {
+fn ctrl_c_cancels_requested_long_running_command_after_snapshot_follow_up() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+        FeatureFlag::AgentView.set_enabled(true);
+
+        let terminal = add_window_with_terminal(&mut app, None);
+        let pty_writes: Rc<RefCell<Vec<Vec<u8>>>> = Rc::new(RefCell::new(Vec::new()));
+        let writes = pty_writes.clone();
+        app.update(|ctx| {
+            ctx.subscribe_to_view(&terminal, move |_, event, _| {
+                if let Event::WriteBytesToPty { bytes } = event {
+                    writes.borrow_mut().push(bytes.to_vec());
+                }
+            });
+        });
+
+        let action_id = AIAgentActionId::from("requested-command".to_owned());
+
+        let conversation_id = terminal.update(&mut app, |view, ctx| {
+            let conversation_id =
+                BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
+                    history.start_new_conversation(view.view_id, false, false, false, ctx)
+                });
+            let task_id = BlocklistAIHistoryModel::as_ref(ctx)
+                .conversation(&conversation_id)
+                .expect("conversation should exist")
+                .get_root_task_id()
+                .clone();
+
+            view.model
+                .lock()
+                .simulate_long_running_block("sleep 20", "running");
+            let block_id = view.model.lock().block_list().active_block().id().clone();
+            view.model
+                .lock()
+                .block_list_mut()
+                .active_block_mut()
+                .set_agent_interaction_mode_for_requested_command(
+                    action_id.clone(),
+                    None,
+                    conversation_id,
+                );
+            view.ai_action_model.update(ctx, |action_model, ctx| {
+                action_model.apply_finished_action_result(
+                    conversation_id,
+                    AIAgentActionResult {
+                        id: action_id.clone(),
+                        task_id,
+                        result: AIAgentActionResultType::RequestCommandOutput(
+                            RequestCommandOutputResult::LongRunningCommandSnapshot {
+                                block_id,
+                                command: "sleep 20".to_owned(),
+                                grid_contents: String::new(),
+                                cursor: String::new(),
+                                is_alt_screen_active: false,
+                            },
+                        ),
+                    },
+                    ctx,
+                );
+            });
+            view.ai_controller.update(ctx, |controller, ctx| {
+                controller.clear_finished_action_results(conversation_id, ctx);
+            });
+
+            let model = view.model.lock();
+            let active_block = model.block_list().active_block();
+            assert!(active_block.is_active_and_long_running());
+            assert!(active_block.requested_command_action_id().is_some());
+            assert!(active_block.long_running_control_state().is_none());
+            assert!(view
+                .ai_action_model
+                .as_ref(ctx)
+                .get_action_status(&action_id)
+                .is_none());
+            conversation_id
+        });
+
+        terminal.update(&mut app, |view, ctx| {
+            view.handle_action(&TerminalAction::CtrlC, ctx);
+        });
+
+        assert_eq!(*pty_writes.borrow(), vec![vec![C0::ETX]]);
+        terminal.read(&app, |view, ctx| {
+            assert!(!view
+                .ai_controller
+                .as_ref(ctx)
+                .has_active_stream_for_conversation(conversation_id, ctx));
+            let conversation = BlocklistAIHistoryModel::as_ref(ctx)
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.status(), &ConversationStatus::Cancelled);
+            let model = view.model.lock();
+            assert!(!model.block_list().active_block().is_agent_driving_command());
+        });
+    })
+}
+
+#[test]
+fn ctrl_c_interrupts_requested_command_before_long_running_threshold() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+        FeatureFlag::AgentView.set_enabled(true);
+
+        let terminal = add_window_with_terminal(&mut app, None);
+        let pty_writes: Rc<RefCell<Vec<Vec<u8>>>> = Rc::new(RefCell::new(Vec::new()));
+        let writes = pty_writes.clone();
+        app.update(|ctx| {
+            ctx.subscribe_to_view(&terminal, move |_, event, _| {
+                if let Event::WriteBytesToPty { bytes } = event {
+                    writes.borrow_mut().push(bytes.to_vec());
+                }
+            });
+        });
+
+        let action_id = AIAgentActionId::from("requested-command".to_owned());
+        let conversation_id = terminal.update(&mut app, |view, ctx| {
+            let conversation_id =
+                BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
+                    history.start_new_conversation(view.view_id, false, false, false, ctx)
+                });
+
+            let mut model = view.model.lock();
+            model.block_list_mut().active_block_mut().start();
+            model.simulate_cmd("sleep 20");
+            model.process_bytes("running");
+            model
+                .block_list_mut()
+                .active_block_mut()
+                .set_agent_interaction_mode_for_requested_command(action_id, None, conversation_id);
+
+            let active_block = model.block_list().active_block();
+            assert!(!active_block.is_active_and_long_running());
+            assert!(active_block.is_executing() || active_block.is_command_grid_active());
+            assert!(active_block.requested_command_action_id().is_some());
+            assert!(active_block.long_running_control_state().is_none());
+
+            conversation_id
+        });
+
+        terminal.update(&mut app, |view, ctx| {
+            view.handle_action(&TerminalAction::CtrlC, ctx);
+        });
+
+        assert_eq!(*pty_writes.borrow(), vec![vec![C0::ETX]]);
+        terminal.read(&app, |_, ctx| {
+            let conversation = BlocklistAIHistoryModel::as_ref(ctx)
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.status(), &ConversationStatus::Cancelled);
+        });
+        terminal.read(&app, |view, _| {
+            let model = view.model.lock();
+            assert!(!model.block_list().active_block().is_agent_driving_command());
+        });
+    })
+}
+
+#[test]
+fn ctrl_c_after_stop_takeover_cancels_conversation() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
         FeatureFlag::AgentView.set_enabled(true);
@@ -5246,24 +5405,11 @@ fn ctrl_c_after_takeover_interrupts_command_without_cancelling_conversation() {
                 .set_agent_interaction_mode_for_agent_monitored_command(&task_id, conversation_id)
                 .expect("command should become agent monitored");
 
-            conversation_id
-        });
+            view.cli_subagent_controller.update(ctx, |controller, ctx| {
+                controller.switch_control_to_user(UserTakeOverReason::Stop, ctx);
+            });
 
-        terminal.update(&mut app, |view, ctx| {
-            view.handle_action(&TerminalAction::CtrlC, ctx);
-        });
-        assert!(pty_writes.borrow().is_empty());
-        terminal.read(&app, |view, ctx| {
-            let model = view.model.lock();
-            let active_block = model.block_list().active_block();
-            assert!(active_block
-                .long_running_control_state()
-                .and_then(|state| state.user_take_over_reason())
-                .is_some_and(|reason| matches!(reason, UserTakeOverReason::Manual)));
-            let conversation = BlocklistAIHistoryModel::as_ref(ctx)
-                .conversation(&conversation_id)
-                .expect("conversation should exist");
-            assert_eq!(conversation.status(), &ConversationStatus::InProgress);
+            conversation_id
         });
 
         terminal.update(&mut app, |view, ctx| {
@@ -5275,7 +5421,7 @@ fn ctrl_c_after_takeover_interrupts_command_without_cancelling_conversation() {
             let conversation = BlocklistAIHistoryModel::as_ref(ctx)
                 .conversation(&conversation_id)
                 .expect("conversation should exist");
-            assert_eq!(conversation.status(), &ConversationStatus::InProgress);
+            assert_eq!(conversation.status(), &ConversationStatus::Cancelled);
         });
     })
 }
