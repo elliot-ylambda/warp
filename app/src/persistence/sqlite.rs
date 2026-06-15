@@ -2749,7 +2749,11 @@ fn read_sqlite_data(
     let time_of_next_force_object_refresh = read_time_of_next_force_object_refresh(conn)?;
 
     let ai_queries = read_ai_queries(conn)?;
-    let nld_prompts = read_nld_prompts(conn)?;
+    // Only read NLD prompt-history candidates when nld_prompt_history_match is enabled, 
+    let nld_prompts = cfg!(feature = "nld_prompt_history_match")
+        .then(|| read_nld_prompts(conn))
+        .transpose()?
+        .unwrap_or_default();
 
     let codebase_indices = get_all_codebase_index_metadata(conn)?;
     let workspace_language_servers = get_all_workspace_language_servers_by_workspace(conn)?;
