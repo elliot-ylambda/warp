@@ -156,16 +156,14 @@ impl Block {
         }
     }
 
-    /// Sets control to user with Stop reason if a long-running control state exists.
-    pub fn set_user_control_with_stop_reason(&mut self) {
-        if let InteractionMode::Agent(AgentInteractionMetadata {
-            long_running_control_state: Some(ref mut state),
-            ..
-        }) = self.interaction_mode
-        {
-            *state = LongRunningCommandControlState::User {
-                reason: UserTakeOverReason::Stop,
-            };
+    pub fn suppress_agent_auto_resume(&mut self) {
+        if let InteractionMode::Agent(metadata) = &mut self.interaction_mode {
+            metadata.suppress_auto_resume = true;
+            if let Some(state) = &mut metadata.long_running_control_state {
+                *state = LongRunningCommandControlState::User {
+                    reason: UserTakeOverReason::Manual,
+                };
+            }
         }
     }
 
@@ -230,6 +228,7 @@ impl Block {
             long_running_control_state: None,
             has_agent_written_to_block: false,
             should_hide_block: true,
+            suppress_auto_resume: false,
         })
     }
 
@@ -341,13 +340,16 @@ impl InteractionMode {
         task_id: &TaskId,
         conversation_id: AIConversationId,
     ) -> Result<Self, UpdateInteractionModeError> {
-        let requested_command_action_id = match self {
-            InteractionMode::User(_) => None,
+        let (requested_command_action_id, suppress_auto_resume) = match self {
+            InteractionMode::User(_) => (None, false),
             InteractionMode::Agent(metadata) => {
                 if metadata.conversation_id != conversation_id {
                     return Err(UpdateInteractionModeError::UnexpectedConversationId);
                 }
-                metadata.requested_command_action_id.clone()
+                (
+                    metadata.requested_command_action_id.clone(),
+                    metadata.suppress_auto_resume,
+                )
             }
         };
 
@@ -361,6 +363,7 @@ impl InteractionMode {
             }),
             has_agent_written_to_block: false,
             should_hide_block: false,
+            suppress_auto_resume,
         }))
     }
 
@@ -485,6 +488,8 @@ pub struct AgentInteractionMetadata {
     /// `true` if this block should be hidden from the user (as is the case with AI-requested
     /// commands, for example).
     should_hide_block: bool,
+
+    suppress_auto_resume: bool,
 }
 
 impl AgentInteractionMetadata {
@@ -504,6 +509,7 @@ impl AgentInteractionMetadata {
             long_running_control_state,
             has_agent_written_to_block,
             should_hide_block,
+            suppress_auto_resume: false,
         }
     }
 
@@ -550,6 +556,13 @@ impl AgentInteractionMetadata {
 
     pub fn should_hide_block(&self) -> bool {
         self.should_hide_block
+    }
+    pub fn suppress_auto_resume(&mut self) {
+        self.suppress_auto_resume = true;
+    }
+
+    pub fn should_suppress_auto_resume(&self) -> bool {
+        self.suppress_auto_resume
     }
 }
 

@@ -80,7 +80,6 @@ const MCP_TOOL_WAITING_FOR_USER_MESSAGE: &str = "OK if I call this MCP tool?";
 const MONITORING_COMMAND_MESSAGE: &str = "Agent is monitoring command...";
 const AGENT_NEEDS_INPUT_MESSAGE: &str = "Agent needs your input to continue";
 const USER_TOOK_CONTROL_COMMAND_MESSAGE: &str = "User is in control.";
-const USER_STOPPED_CLI_SUBAGENT_COMMAND_MESSAGE: &str = "Paused agent. User is in control.";
 const AGENT_REQUESTED_USER_TAKE_CONTROL_COMMAND_MESSAGE: &str = "User in control";
 const AGENT_ERRORED_COMMAND_MESSAGE: &str = "Agent ran into an issue. Take over control.";
 pub const VIEWING_COMMAND_DETAIL_MESSAGE: &str = "Viewing command detail";
@@ -1318,7 +1317,6 @@ pub(crate) fn header_message_for_user_take_over_reason(
 ) -> &'static str {
     match reason {
         UserTakeOverReason::Manual => USER_TOOK_CONTROL_COMMAND_MESSAGE,
-        UserTakeOverReason::Stop => USER_STOPPED_CLI_SUBAGENT_COMMAND_MESSAGE,
         UserTakeOverReason::TransferFromAgent { .. } => {
             AGENT_REQUESTED_USER_TAKE_CONTROL_COMMAND_MESSAGE
         }

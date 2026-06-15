@@ -27,8 +27,8 @@ use crate::BlocklistAIHistoryModel;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum UserTakeOverReason {
+    #[serde(alias = "Stop")]
     Manual,
-    Stop,
     /// The agent explicitly transferred control to the user via the
     /// TransferShellCommandControlToUser tool call.
     TransferFromAgent {
@@ -44,10 +44,6 @@ struct ActiveCLISubagentState {
 }
 
 impl UserTakeOverReason {
-    pub fn is_stop(&self) -> bool {
-        matches!(self, Self::Stop)
-    }
-
     pub fn is_transfer_from_agent(&self) -> bool {
         matches!(self, Self::TransferFromAgent { .. })
     }
@@ -225,25 +221,6 @@ impl CLISubagentController {
                     .as_ref()
                     .is_some_and(|state| state.task_id.is_some())
                 {
-                    let is_inline_agent_view =
-                        me.agent_view_controller.as_ref().is_some_and(|controller| {
-                            controller.read(ctx, |controller, _| controller.is_inline())
-                        });
-
-                    if is_inline_agent_view {
-                        // Mark conversation as successfully completed BEFORE exiting agent view.
-                        // The command finished naturally, so this is a successful completion.
-                        if let Some(conversation_id) = conversation_id {
-                            me.controller.update(ctx, |controller, ctx| {
-                                controller.cancel_conversation_progress(
-                                    conversation_id,
-                                    CancellationReason::OptimisticCLISubagentCompletion,
-                                    ctx,
-                                );
-                            });
-                        }
-                    }
-
                     ctx.emit(CLISubagentEvent::FinishedSubagent {
                         block_id,
                         conversation_id,

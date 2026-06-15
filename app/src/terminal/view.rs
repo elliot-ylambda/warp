@@ -2380,7 +2380,6 @@ pub struct TerminalViewStateChange {
 struct CtrlCActiveBlockState {
     is_long_running: bool,
     is_agent_in_control_of_command: bool,
-    conversation_id_to_stop: Option<AIConversationId>,
 }
 
 impl Default for TerminalViewStateChange {
@@ -3757,7 +3756,21 @@ impl TerminalView {
                 });
                 ctx.emit(Event::SummarizationCancelDialogToggled { is_open: *is_open });
             }
-            BlocklistAIStatusBarEvent::Stop => me.ctrl_c(ctx),
+            BlocklistAIStatusBarEvent::Stop => {
+                let conversation_id = me
+                    .agent_view_controller
+                    .as_ref(ctx)
+                    .agent_view_state()
+                    .active_conversation_id()
+                    .or_else(|| {
+                        BlocklistAIHistoryModel::as_ref(ctx).active_conversation_id(me.view_id)
+                    });
+                if let Some(conversation_id) = conversation_id {
+                    me.stop_local_agent_conversation(conversation_id, ctx);
+                } else {
+                    me.ctrl_c(ctx);
+                }
+            }
         });
         if let Some(ambient_agent_view_model) = ambient_agent_view_model.as_ref() {
             ctx.subscribe_to_model(ambient_agent_view_model, |me, _, event, ctx| {
@@ -8431,7 +8444,7 @@ impl TerminalView {
                 || active_block.is_active_and_long_running();
 
             if active_block_matches && command_is_running {
-                active_block.set_user_control_with_stop_reason();
+                active_block.suppress_agent_auto_resume();
                 true
             } else {
                 false
@@ -8509,19 +8522,9 @@ impl TerminalView {
             let active_block = model.block_list().active_block();
             let is_long_running = active_block.is_active_and_long_running();
             let is_agent_in_control_of_command = active_block.is_agent_in_control();
-            let conversation_id_to_stop = active_block
-                .long_running_control_state()
-                .and_then(|state| {
-                    state
-                        .user_take_over_reason()
-                        .is_some_and(UserTakeOverReason::is_stop)
-                        .then(|| active_block.ai_conversation_id())
-                })
-                .flatten();
             let active_block_state = CtrlCActiveBlockState {
                 is_long_running,
                 is_agent_in_control_of_command,
-                conversation_id_to_stop,
             };
             (
                 has_block_list_selection,
@@ -8635,15 +8638,10 @@ impl TerminalView {
     ) {
         if active_block_state.is_agent_in_control_of_command {
             self.cli_subagent_controller.update(ctx, |controller, ctx| {
-                controller.switch_control_to_user(UserTakeOverReason::Stop, ctx);
+                controller.switch_control_to_user(UserTakeOverReason::Manual, ctx);
             });
         } else if active_block_state.is_long_running {
-            // A second Ctrl+C after Stop takeover should cancel both the command and conversation.
-            if let Some(conversation_id) = active_block_state.conversation_id_to_stop {
-                self.stop_local_agent_conversation(conversation_id, ctx);
-            } else {
-                self.user_write_ctrl_c_to_pty(ctx);
-            }
+            self.user_write_ctrl_c_to_pty(ctx);
         } else {
             self.maybe_handle_ctrl_c_in_rich_content_block(ctx);
         }
@@ -10855,13 +10853,10 @@ impl TerminalView {
             match ai_metadata {
                 Some(ai_metadata)
                     if ai_metadata.requested_command_action_id().is_some()
+                        && !ai_metadata.should_suppress_auto_resume()
                         && ai_metadata
                             .long_running_control_state()
-                            .is_some_and(|state| {
-                                state
-                                    .user_take_over_reason()
-                                    .is_some_and(|reason| !reason.is_stop())
-                            }) =>
+                            .is_some_and(|state| state.user_take_over_reason().is_some()) =>
                 {
                     Some(*ai_metadata.conversation_id())
                 }
@@ -24575,8 +24570,8 @@ impl TerminalView {
             );
         });
 
-        // If the active block is a running command from this conversation, stop it and
-        // set the take-over reason to Stop to prevent automatic conversation resume.
+        // If the active block is a running command from this conversation, suppress
+        // automatic conversation resume when the command eventually completes.
         let should_stop_running_command = {
             let mut model = self.model.lock();
             let active_block = model.block_list_mut().active_block_mut();
@@ -24585,7 +24580,7 @@ impl TerminalView {
                 && active_block.ai_conversation_id() == Some(conversation_id);
 
             if is_from_this_conversation {
-                active_block.set_user_control_with_stop_reason();
+                active_block.suppress_agent_auto_resume();
             }
 
             is_from_this_conversation
