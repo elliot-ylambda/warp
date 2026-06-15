@@ -251,14 +251,10 @@ pub struct BlocklistAIHistoryModel {
     persisted_queries: Vec<PersistedAIInput>,
 
     /// Prompt-history candidates for NLD input classification, read once from `ai_queries` at
-    /// startup. Ordered newest-first (the read orders by `id` descending) and never mutated at
-    /// runtime, so it acts as a frozen snapshot analogous to shell history-file commands.
+    /// startup. 
     nld_persisted_prompts: Vec<(Arc<str>, DateTime<Local>)>,
 
-    /// User-query prompts submitted during the current session, in chronological (append) order.
-    /// Because [`Self::nld_persisted_prompts`] is frozen at startup, every entry here is newer
-    /// than the snapshot, analogous to in-session shell commands. Iterating these reversed and
-    /// then the snapshot yields a strictly newest-first stream without sorting.
+    /// User-query prompts submitted during the current session,
     nld_session_prompts: Vec<(Arc<str>, DateTime<Local>)>,
 
     /// Metadata for both local and ambient agent conversations.
@@ -1012,11 +1008,8 @@ impl BlocklistAIHistoryModel {
             .get_mut(&conversation_id)
             .ok_or(UpdateHistoryError::ConversationNotFound(conversation_id))?;
 
-        // Capture whether this request adds the conversation's first
-        // root-task exchange for a child-agent conversation. That first exchange is the synthetic
-        // orchestrator prompt (not user input), which the NLD prompt history needs to exclude.
-        // TODO(QUALITY-636): Replace this positional skip with an `is_agent_initiated` field on
-        // the MAA UserQuery proto message so the flag survives server restoration.
+        // That first exchange is the synthetic orchestrator prompt (not user input)
+        // which the NLD prompt history needs to exclude.
         let is_synthetic_orchestrator_prompt = conversation.is_child_agent_conversation()
             && conversation.root_task_exchanges().next().is_none();
 
@@ -2278,12 +2271,6 @@ impl BlocklistAIHistoryModel {
     }
 
     /// Returns the prompt-history candidates for NLD input classification, newest-first.
-    ///
-    /// Session prompts are appended chronologically, so they are iterated reversed; the persisted
-    /// snapshot is already newest-first and every session prompt is newer than it, so the chained
-    /// stream is strictly newest-first without sorting. Duplicates are intentionally not removed:
-    /// the fuzzy matcher early-returns on the first (most-recent) match, so dups cost only a cheap
-    /// extra comparison. Cloning is O(1) per entry since the text is an `Arc<str>`.
     pub(crate) fn nld_prompt_history(&self) -> Vec<(Arc<str>, DateTime<Local>)> {
         self.nld_session_prompts
             .iter()
