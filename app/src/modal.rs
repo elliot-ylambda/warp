@@ -22,6 +22,7 @@ pub const MODAL_WIDTH: f32 = 440.;
 pub const MODAL_HEADER_HEIGHT: f32 = 70.;
 pub const MODAL_PADDING: f32 = 28.;
 pub const MODAL_BACKDROP_OPACITY: u8 = 179;
+const MODAL_TOP_MARGIN: f32 = 35.;
 
 #[derive(Clone)]
 pub struct Modal<T> {
@@ -37,6 +38,7 @@ pub struct Modal<T> {
     close_modal_hover_state: MouseStateHandle,
     background_opacity: u8,
     offset_positioning: OffsetPositioning,
+    max_height_percentage: Option<f32>,
     /// Optional keystroke to display alongside the close button.
     dismiss_keystroke: Option<Keystroke>,
 }
@@ -163,6 +165,7 @@ impl<T: View> Modal<T> {
             close_modal_hover_state: Default::default(),
             background_opacity: MODAL_BACKDROP_OPACITY,
             offset_positioning: Self::default_offset_positioning(),
+            max_height_percentage: None,
             dismiss_keystroke: None,
         }
     }
@@ -199,6 +202,11 @@ impl<T: View> Modal<T> {
 
     pub fn with_background_opacity(mut self, opacity: u8) -> Self {
         self.background_opacity = opacity;
+        self
+    }
+    /// Caps the modal height at a percentage of the containing window height.
+    pub fn with_max_height_percentage(mut self, percentage: f32) -> Self {
+        self.max_height_percentage = Some(percentage.clamp(0., 1.));
         self
     }
 
@@ -388,7 +396,7 @@ impl<T: View> Modal<T> {
         }
     }
 
-    fn render_body(&self) -> Box<dyn Element> {
+    fn render_body(&self, max_height: f32) -> Box<dyn Element> {
         let mut container = Container::new(ChildView::new(&self.body).finish());
 
         if self.title.is_some() {
@@ -408,8 +416,28 @@ impl<T: View> Modal<T> {
                 .with_padding_bottom(padding.bottom);
         }
         ConstrainedBox::new(container.finish())
-            .with_max_height(self.body_styles.height.unwrap())
+            .with_max_height(max_height)
             .finish()
+    }
+
+    fn max_heights(&self, app: &AppContext) -> (f32, f32) {
+        let modal_max_height = self.modal_styles.height.unwrap();
+        let body_max_height = self.body_styles.height.unwrap();
+        let Some(max_height_percentage) = self.max_height_percentage else {
+            return (modal_max_height, body_max_height);
+        };
+        let Some(window) = app.windows().platform_window(self.body.window_id(app)) else {
+            return (modal_max_height, body_max_height);
+        };
+
+        let modal_max_height = window.size().y() * max_height_percentage;
+        let header_max_height = if self.title.is_some() {
+            self.header_styles.height.unwrap_or(MODAL_HEADER_HEIGHT)
+        } else {
+            0.
+        };
+        let body_max_height = (modal_max_height - MODAL_TOP_MARGIN - header_max_height).max(0.);
+        (modal_max_height, body_max_height)
     }
 
     pub fn body(&self) -> &ViewHandle<T> {
@@ -456,14 +484,15 @@ impl<T: View> View for Modal<T> {
 
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         let appearance = Appearance::as_ref(app);
+        let (modal_max_height, body_max_height) = self.max_heights(app);
         let header = self.render_header(appearance);
         let contents = if let Some(header) = header {
             Flex::column()
                 .with_child(header)
-                .with_child(self.render_body())
+                .with_child(self.render_body(body_max_height))
                 .finish()
         } else {
-            self.render_body()
+            self.render_body(body_max_height)
         };
 
         let mut modal = ConstrainedBox::new(
@@ -474,11 +503,11 @@ impl<T: View> View for Modal<T> {
                     Border::all(self.modal_styles.border_width.unwrap())
                         .with_border_fill(self.modal_styles.border_color.unwrap()),
                 )
-                .with_margin_top(35.)
+                .with_margin_top(MODAL_TOP_MARGIN)
                 .finish(),
         )
         .with_max_width(self.modal_styles.width.unwrap())
-        .with_max_height(self.modal_styles.height.unwrap())
+        .with_max_height(modal_max_height)
         .finish();
 
         if self.dismiss_on_click {

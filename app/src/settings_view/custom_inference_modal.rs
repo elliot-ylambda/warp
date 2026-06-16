@@ -6,11 +6,13 @@ use warp_editor::editor::NavigationKey;
 use warpui::elements::{
     Border, ChildView, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
     CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex, MainAxisSize, MouseStateHandle,
-    ParentElement, Radius, ScrollbarWidth, Text,
+    ParentElement, Radius, SavePosition, ScrollTarget, ScrollToPositionMode, ScrollbarWidth,
+    Shrinkable, Text,
 };
 use warpui::fonts::FamilyId;
 use warpui::ui_components::button::ButtonVariant;
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
+use warpui::units::Pixels;
 use warpui::{
     AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
@@ -30,6 +32,11 @@ const INPUT_WIDTH: f32 = 480.;
 const MODEL_ROW_SPACING: f32 = 16.;
 const REMOVE_MODEL_BUTTON_COL_WIDTH: f32 = 32.;
 const MODEL_INPUT_WIDTH: f32 = (INPUT_WIDTH - MODEL_ROW_SPACING) / 2.;
+const MODEL_INPUT_WIDTH_WITH_REMOVE_BUTTON: f32 =
+    (INPUT_WIDTH - MODEL_ROW_SPACING * 2. - REMOVE_MODEL_BUTTON_COL_WIDTH) / 2.;
+fn model_row_scroll_position_id(index: usize) -> String {
+    format!("custom_endpoint_model_row_{index}")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CustomEndpointModalEvent {
@@ -448,6 +455,10 @@ impl CustomEndpointModal {
             me.handle_model_editor_event(&editor, event, ctx);
         });
         self.model_rows.push(row);
+        // ClippedScrollable clamps this to its true maximum after laying out the new row.
+        // Until the rows overflow, that maximum remains zero and the modal grows naturally.
+        self.model_section_scroll_state
+            .scroll_to(Pixels::new(f32::MAX));
         ctx.notify();
     }
 
@@ -472,6 +483,22 @@ impl CustomEndpointModal {
         is_endpoint_form_valid(&name, &url, &api_key, has_models)
     }
 
+    fn focus_editor(&self, editor: &ViewHandle<EditorView>, ctx: &mut ViewContext<Self>) {
+        ctx.focus(editor);
+        if let Some(index) = self
+            .model_rows
+            .iter()
+            .position(|row| row.name_editor == *editor || row.alias_editor == *editor)
+        {
+            self.model_section_scroll_state
+                .scroll_to_position(ScrollTarget {
+                    position_id: model_row_scroll_position_id(index),
+                    mode: ScrollToPositionMode::FullyIntoView,
+                });
+            ctx.notify();
+        }
+    }
+
     fn focus_next_editor(&self, current: &ViewHandle<EditorView>, ctx: &mut ViewContext<Self>) {
         let mut editors: Vec<&ViewHandle<EditorView>> = vec![
             &self.endpoint_name_editor,
@@ -484,7 +511,7 @@ impl CustomEndpointModal {
         }
         if let Some(pos) = editors.iter().position(|e| *e == current) {
             let next = (pos + 1) % editors.len();
-            ctx.focus(editors[next]);
+            self.focus_editor(editors[next], ctx);
         }
     }
 
@@ -500,7 +527,7 @@ impl CustomEndpointModal {
         }
         if let Some(pos) = editors.iter().position(|e| *e == current) {
             let prev = if pos == 0 { editors.len() - 1 } else { pos - 1 };
-            ctx.focus(editors[prev]);
+            self.focus_editor(editors[prev], ctx);
         }
     }
 
@@ -566,7 +593,7 @@ impl CustomEndpointModal {
         match event {
             EditorEvent::Navigate(NavigationKey::Tab) => {
                 if let Some(first_row) = self.model_rows.first() {
-                    ctx.focus(&first_row.name_editor);
+                    self.focus_editor(&first_row.name_editor, ctx);
                 }
             }
             EditorEvent::Navigate(NavigationKey::ShiftTab) => {
@@ -574,7 +601,7 @@ impl CustomEndpointModal {
             }
             EditorEvent::Enter => {
                 if let Some(first_row) = self.model_rows.first() {
-                    ctx.focus(&first_row.name_editor);
+                    self.focus_editor(&first_row.name_editor, ctx);
                 }
             }
             EditorEvent::Escape => {
@@ -645,7 +672,7 @@ impl View for CustomEndpointModal {
             ..Default::default()
         };
 
-        let mut column = Flex::column().with_main_axis_size(MainAxisSize::Max);
+        let mut column = Flex::column();
 
         // Description
         column.add_child(
@@ -729,18 +756,23 @@ impl View for CustomEndpointModal {
 
         // Model rows
         let has_remove_model_button = self.model_rows.len() > 1;
+        let model_input_width = if has_remove_model_button {
+            MODEL_INPUT_WIDTH_WITH_REMOVE_BUTTON
+        } else {
+            MODEL_INPUT_WIDTH
+        };
         let mut model_labels = Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_spacing(MODEL_ROW_SPACING)
             .with_child(
                 ConstrainedBox::new(label("Model name"))
-                    .with_width(MODEL_INPUT_WIDTH)
+                    .with_width(model_input_width)
                     .finish(),
             )
             .with_child(
                 ConstrainedBox::new(label("Model alias (optional)"))
-                    .with_width(MODEL_INPUT_WIDTH)
+                    .with_width(model_input_width)
                     .finish(),
             );
         if has_remove_model_button {
@@ -758,15 +790,13 @@ impl View for CustomEndpointModal {
                 .finish(),
         );
 
-        // Scrollable section: model rows + "+ Add model" button
         let mut model_section = Flex::column();
-
         for (i, row) in self.model_rows.iter().enumerate() {
             let name_input = appearance
                 .ui_builder()
                 .text_input(row.name_editor.clone())
                 .with_style(UiComponentStyles {
-                    width: Some(MODEL_INPUT_WIDTH),
+                    width: Some(model_input_width),
                     ..Default::default()
                 })
                 .build()
@@ -776,7 +806,7 @@ impl View for CustomEndpointModal {
                 .ui_builder()
                 .text_input(row.alias_editor.clone())
                 .with_style(UiComponentStyles {
-                    width: Some(MODEL_INPUT_WIDTH),
+                    width: Some(model_input_width),
                     ..Default::default()
                 })
                 .build()
@@ -810,33 +840,14 @@ impl View for CustomEndpointModal {
             }
             let row = row.finish();
 
-            model_section.add_child(Container::new(row).with_margin_bottom(12.).finish());
+            model_section.add_child(
+                SavePosition::new(
+                    Container::new(row).with_margin_bottom(12.).finish(),
+                    &model_row_scroll_position_id(i),
+                )
+                .finish(),
+            );
         }
-
-        // + Add model button (inside scroll so it remains reachable)
-        model_section.add_child(
-            Container::new(
-                appearance
-                    .ui_builder()
-                    .button(
-                        ButtonVariant::Secondary,
-                        self.add_model_button_mouse_state.clone(),
-                    )
-                    .with_text_label("+ Add model".to_string())
-                    .with_style(UiComponentStyles {
-                        font_size: Some(14.),
-                        padding: Some(Coords::uniform(6.).left(8.).right(8.)),
-                        ..Default::default()
-                    })
-                    .build()
-                    .on_click(move |ctx, _, _| {
-                        ctx.dispatch_typed_action(CustomEndpointModalAction::AddModel);
-                    })
-                    .finish(),
-            )
-            .with_margin_bottom(8.)
-            .finish(),
-        );
 
         let model_scrollable = ClippedScrollable::vertical(
             self.model_section_scroll_state.clone(),
@@ -847,16 +858,32 @@ impl View for CustomEndpointModal {
             warpui::elements::Fill::None,
         )
         .with_overlayed_scrollbar()
+        .with_padding_start(0.)
+        .with_padding_end(0.)
         .finish();
-
-        column.add_child(
-            Expanded::new(
-                1.,
-                Container::new(model_scrollable)
-                    .with_margin_bottom(24.)
-                    .finish(),
+        let add_model_button = appearance
+            .ui_builder()
+            .button(
+                ButtonVariant::Secondary,
+                self.add_model_button_mouse_state.clone(),
             )
-            .finish(),
+            .with_text_label("+ Add model".to_string())
+            .with_style(UiComponentStyles {
+                font_size: Some(14.),
+                padding: Some(Coords::uniform(6.).left(8.).right(8.)),
+                ..Default::default()
+            })
+            .build()
+            .on_click(move |ctx, _, _| {
+                ctx.dispatch_typed_action(CustomEndpointModalAction::AddModel);
+            })
+            .finish();
+
+        column.add_child(Shrinkable::new(1., Container::new(model_scrollable).finish()).finish());
+        column.add_child(
+            Container::new(add_model_button)
+                .with_margin_bottom(24.)
+                .finish(),
         );
 
         // Bottom buttons row

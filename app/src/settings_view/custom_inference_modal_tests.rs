@@ -47,6 +47,94 @@ fn modal_with_many_models_lays_out() {
 }
 
 #[test]
+fn model_row_width_reserves_remove_button_column() {
+    assert_eq!(
+        MODEL_INPUT_WIDTH_WITH_REMOVE_BUTTON * 2.
+            + MODEL_ROW_SPACING * 2.
+            + REMOVE_MODEL_BUTTON_COL_WIDTH,
+        INPUT_WIDTH
+    );
+}
+
+#[test]
+fn focus_editor_scrolls_model_row_into_view() {
+    App::test((), |mut app| async move {
+        init_modal_test_models(&mut app);
+        let endpoint = endpoint_with_models(20);
+        let (window_id, modal) = app.add_window(WindowStyle::NotStealFocus, move |ctx| {
+            CustomEndpointModal::new(Some(&endpoint), Some(0), ctx)
+        });
+
+        app.update(|ctx| {
+            ctx.presenter(window_id)
+                .expect("presenter should exist")
+                .borrow_mut()
+                .build_scene(vec2f(560., 600.), 1., None, ctx);
+        });
+        modal.update(&mut app, |modal, ctx| {
+            let editor = modal
+                .model_rows
+                .last()
+                .expect("model row should exist")
+                .name_editor
+                .clone();
+            modal.focus_editor(&editor, ctx);
+        });
+        app.update(|ctx| {
+            ctx.presenter(window_id)
+                .expect("presenter should exist")
+                .borrow_mut()
+                .build_scene(vec2f(560., 600.), 1., None, ctx);
+
+            assert!(modal.as_ref(ctx).model_section_scroll_state.scroll_start() > Pixels::zero());
+        });
+    })
+}
+
+#[test]
+fn add_model_scrolls_only_after_model_section_is_full() {
+    App::test((), |mut app| async move {
+        init_modal_test_models(&mut app);
+        let endpoint = endpoint_with_models(1);
+        let (window_id, modal) = app.add_window(WindowStyle::NotStealFocus, move |ctx| {
+            CustomEndpointModal::new(Some(&endpoint), Some(0), ctx)
+        });
+
+        modal.update(&mut app, |modal, ctx| modal.add_model(ctx));
+        app.update(|ctx| {
+            ctx.presenter(window_id)
+                .expect("presenter should exist")
+                .borrow_mut()
+                .build_scene(vec2f(560., 600.), 1., None, ctx);
+
+            assert_eq!(
+                modal.as_ref(ctx).model_section_scroll_state.scroll_start(),
+                Pixels::zero()
+            );
+        });
+
+        modal.update(&mut app, |modal, ctx| {
+            for _ in 0..20 {
+                modal.add_model(ctx);
+            }
+            assert_eq!(
+                modal.model_section_scroll_state.scroll_start(),
+                Pixels::new(f32::MAX)
+            );
+        });
+        app.update(|ctx| {
+            ctx.presenter(window_id)
+                .expect("presenter should exist")
+                .borrow_mut()
+                .build_scene(vec2f(560., 600.), 1., None, ctx);
+            let scroll_start = modal.as_ref(ctx).model_section_scroll_state.scroll_start();
+            assert!(scroll_start > Pixels::zero());
+            assert!(scroll_start < Pixels::new(f32::MAX));
+        });
+    })
+}
+
+#[test]
 fn prefill_resets_model_scroll_position() {
     App::test((), |mut app| async move {
         init_modal_test_models(&mut app);
