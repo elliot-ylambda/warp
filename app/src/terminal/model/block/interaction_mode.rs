@@ -123,6 +123,7 @@ impl Block {
             .is_some_and(|metadata| {
                 metadata.requested_command_action_id().is_some()
                     && metadata.long_running_control_state().is_none()
+                    && !metadata.should_suppress_auto_resume()
             })
     }
 
@@ -164,19 +165,6 @@ impl Block {
                     reason: UserTakeOverReason::Manual,
                 };
             }
-        }
-    }
-
-    /// Marks an agent-associated command as stopped by the user.
-    pub fn set_user_control_with_stop_reason(&mut self) {
-        if let InteractionMode::Agent(AgentInteractionMetadata {
-            ref mut long_running_control_state,
-            ..
-        }) = self.interaction_mode
-        {
-            *long_running_control_state = Some(LongRunningCommandControlState::User {
-                reason: UserTakeOverReason::Stop,
-            });
         }
     }
 
@@ -366,14 +354,22 @@ impl InteractionMode {
             }
         };
 
+        let long_running_control_state = if suppress_auto_resume {
+            Some(LongRunningCommandControlState::User {
+                reason: UserTakeOverReason::Manual,
+            })
+        } else {
+            Some(LongRunningCommandControlState::Agent {
+                is_blocked: false,
+                should_hide_responses: false,
+            })
+        };
+
         Ok(Self::Agent(AgentInteractionMetadata {
             requested_command_action_id,
             conversation_id,
             subagent_task_id: Some(task_id.clone()),
-            long_running_control_state: Some(LongRunningCommandControlState::Agent {
-                is_blocked: false,
-                should_hide_responses: false,
-            }),
+            long_running_control_state,
             has_agent_written_to_block: false,
             should_hide_block: false,
             suppress_auto_resume,

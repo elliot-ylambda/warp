@@ -5372,7 +5372,7 @@ fn ctrl_c_interrupts_requested_command_before_long_running_threshold() {
 }
 
 #[test]
-fn ctrl_c_after_stop_takeover_cancels_conversation() {
+fn ctrl_c_after_takeover_interrupts_command_without_cancelling_conversation() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
         FeatureFlag::AgentView.set_enabled(true);
@@ -5405,11 +5405,24 @@ fn ctrl_c_after_stop_takeover_cancels_conversation() {
                 .set_agent_interaction_mode_for_agent_monitored_command(&task_id, conversation_id)
                 .expect("command should become agent monitored");
 
-            view.cli_subagent_controller.update(ctx, |controller, ctx| {
-                controller.switch_control_to_user(UserTakeOverReason::Stop, ctx);
-            });
-
             conversation_id
+        });
+
+        terminal.update(&mut app, |view, ctx| {
+            view.handle_action(&TerminalAction::CtrlC, ctx);
+        });
+        assert!(pty_writes.borrow().is_empty());
+        terminal.read(&app, |view, ctx| {
+            let model = view.model.lock();
+            let active_block = model.block_list().active_block();
+            assert!(active_block
+                .long_running_control_state()
+                .and_then(|state| state.user_take_over_reason())
+                .is_some_and(|reason| matches!(reason, UserTakeOverReason::Manual)));
+            let conversation = BlocklistAIHistoryModel::as_ref(ctx)
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.status(), &ConversationStatus::InProgress);
         });
 
         terminal.update(&mut app, |view, ctx| {
@@ -5421,7 +5434,7 @@ fn ctrl_c_after_stop_takeover_cancels_conversation() {
             let conversation = BlocklistAIHistoryModel::as_ref(ctx)
                 .conversation(&conversation_id)
                 .expect("conversation should exist");
-            assert_eq!(conversation.status(), &ConversationStatus::Cancelled);
+            assert_eq!(conversation.status(), &ConversationStatus::InProgress);
         });
     })
 }

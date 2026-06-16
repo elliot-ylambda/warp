@@ -599,7 +599,6 @@ enum ActiveCommandCtrlCAction {
         conversation_id: AIConversationId,
         action_id: AIAgentActionId,
     },
-    StopConversation(AIConversationId),
     WriteCtrlCToPty,
 }
 
@@ -2343,7 +2342,6 @@ struct TerminalViewMouseStates {
     /// can pan to read clipped labels.
     breadcrumbs_horizontal_scroll: ClippedScrollStateHandle,
 }
-
 
 /// Where content was routed when sent to a CLI agent.
 /// Returned by [`TerminalView::try_send_text_to_cli_agent_or_rich_input`]
@@ -7438,9 +7436,8 @@ impl TerminalView {
 
                 // While the command was blocked on confirmation, the AI block grabbed focus so
                 // Enter could accept it. Now that it's executing, hand focus back to the
-                // input/terminal so Ctrl-C reaches the command. If the command becomes
-                // long-running, follow-ups should reach the CLI subagent input box without
-                // requiring the user to refocus it.
+                // input/terminal. This keeps Ctrl-C routed to the command and lets the
+                // CLI subagent input receive follow-ups without requiring a refocus.
                 // We call `redetermine_global_focus` rather than `redetermine_terminal_focus`
                 // because the latter deliberately no-ops while an AI block is focused.
                 if ctx.is_self_or_child_focused() {
@@ -8507,7 +8504,7 @@ impl TerminalView {
             {
                 // Mark this before sending ETX so a command that ignores Ctrl-C is no
                 // longer treated as agent-driven if it later becomes long-running.
-                active_block.set_user_control_with_stop_reason();
+                active_block.suppress_agent_auto_resume();
             }
             drop(model);
             self.user_write_ctrl_c_to_pty(ctx);
@@ -8581,15 +8578,10 @@ impl TerminalView {
             let active_block = model.block_list().active_block();
             let is_long_running = active_block.is_active_and_long_running();
             let is_agent_in_control_of_command = active_block.is_agent_in_control();
-            let is_not_monitored_by_agent = active_block.long_running_control_state().is_none()
-                || active_block
-                    .long_running_control_state()
-                    .and_then(|state| state.user_take_over_reason())
-                    .is_some_and(UserTakeOverReason::is_stop);
             // Agent-requested commands need PTY cancellation even before the LRC
             // threshold; otherwise Ctrl-C may be routed to the AI/rich-content path.
             let is_executing_agent_requested_command = !is_long_running
-                && is_not_monitored_by_agent
+                && active_block.long_running_control_state().is_none()
                 && active_block.requested_command_action_id().is_some()
                 && active_block.ai_conversation_id().is_some()
                 && (active_block.is_executing() || active_block.is_command_grid_active());
@@ -8722,7 +8714,7 @@ impl TerminalView {
     ) {
         if is_agent_in_control_of_command {
             self.cli_subagent_controller.update(ctx, |controller, ctx| {
-                controller.switch_control_to_user(UserTakeOverReason::Stop, ctx);
+                controller.switch_control_to_user(UserTakeOverReason::Manual, ctx);
             });
         } else if is_long_running || is_executing_agent_requested_command {
             match self.active_command_ctrl_c_action() {
@@ -8730,9 +8722,6 @@ impl TerminalView {
                     conversation_id,
                     action_id,
                 } => self.cancel_requested_long_running_command(conversation_id, action_id, ctx),
-                ActiveCommandCtrlCAction::StopConversation(conversation_id) => {
-                    self.stop_local_agent_conversation(conversation_id, ctx)
-                }
                 ActiveCommandCtrlCAction::WriteCtrlCToPty => self.user_write_ctrl_c_to_pty(ctx),
             }
         } else {
@@ -8753,16 +8742,6 @@ impl TerminalView {
                     conversation_id,
                     action_id,
                 };
-            }
-        }
-
-        if active_block
-            .long_running_control_state()
-            .and_then(|state| state.user_take_over_reason())
-            .is_some_and(UserTakeOverReason::is_stop)
-        {
-            if let Some(conversation_id) = active_block.ai_conversation_id() {
-                return ActiveCommandCtrlCAction::StopConversation(conversation_id);
             }
         }
 
@@ -10978,11 +10957,7 @@ impl TerminalView {
                         && !ai_metadata.should_suppress_auto_resume()
                         && ai_metadata
                             .long_running_control_state()
-                            .is_some_and(|state| {
-                                state
-                                    .user_take_over_reason()
-                                    .is_some_and(|reason| !reason.is_stop())
-                            }) =>
+                            .is_some_and(|state| state.user_take_over_reason().is_some()) =>
                 {
                     Some(*ai_metadata.conversation_id())
                 }
