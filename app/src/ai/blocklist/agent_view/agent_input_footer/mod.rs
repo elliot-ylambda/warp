@@ -52,6 +52,9 @@ pub(crate) use self::environment_selector::{
 };
 use crate::ai::blocklist::agent_view::is_in_cloud_context;
 use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
+use crate::ai::blocklist::orchestration_topology::{
+    descendant_conversation_ids_in_spawn_order, has_in_progress_descendant_conversation,
+};
 use crate::ai::blocklist::prompt::prompt_alert::{PromptAlertEvent, PromptAlertView};
 use crate::ai::blocklist::usage::icon_for_context_window_usage;
 use crate::ai::blocklist::BlocklistAIInputModel;
@@ -126,6 +129,9 @@ const FAST_FORWARD_LOCKED_TOOLTIP: &str =
 
 const START_REMOTE_CONTROL_TOOLTIP: &str = "Start remote control";
 const START_REMOTE_CONTROL_LOGIN_REQUIRED_TOOLTIP: &str = "Log in to use /remote-control";
+const HANDOFF_TO_CLOUD_TOOLTIP: &str = "Hand off to cloud (or type &)";
+const HANDOFF_CHILD_AGENTS_IN_PROGRESS_TOOLTIP: &str =
+    "Hand off is disabled while child agents are in progress.";
 
 const CLOUD_MODE_V2_FOOTER_GAP: f32 = 4.;
 
@@ -372,7 +378,7 @@ impl AgentInputFooter {
         let handoff_to_cloud_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new("", AgentInputButtonTheme)
                 .with_icon(Icon::UploadCloud)
-                .with_tooltip("Hand off to cloud (or type &)")
+                .with_tooltip(HANDOFF_TO_CLOUD_TOOLTIP)
                 .with_size(button_size)
                 .with_tooltip_alignment(TooltipAlignment::Left)
                 .on_click(|ctx| {
@@ -772,6 +778,7 @@ impl AgentInputFooter {
                 if event
                     .terminal_view_id()
                     .is_some_and(|id| id != me.terminal_view_id)
+                    && !me.is_relevant_orchestration_child_event(event, ctx)
                 {
                     return;
                 }
@@ -785,6 +792,7 @@ impl AgentInputFooter {
                     | BlocklistAIHistoryEvent::RemoveConversation { .. }
                     | BlocklistAIHistoryEvent::UpdatedAutoexecuteOverride { .. } => {
                         me.sync_fast_forward_button(ctx);
+                        me.sync_handoff_to_cloud_button(ctx);
                         me.update_context_window_button(ctx);
                         me.model_selector.update(ctx, |_, ctx| ctx.notify());
                         ctx.notify();
@@ -793,6 +801,7 @@ impl AgentInputFooter {
                     | BlocklistAIHistoryEvent::UpdatedConversationStatus { .. }
                     | BlocklistAIHistoryEvent::AppendedExchange { .. }
                     | BlocklistAIHistoryEvent::UpdatedStreamingExchange { .. } => {
+                        me.sync_handoff_to_cloud_button(ctx);
                         me.update_context_window_button(ctx);
                         me.model_selector.update(ctx, |_, ctx| ctx.notify());
                         ctx.notify();
@@ -878,6 +887,7 @@ impl AgentInputFooter {
         };
         me.sync_fast_forward_button(ctx);
         me.sync_remote_control_button(ctx);
+        me.sync_handoff_to_cloud_button(ctx);
         me.update_context_window_button(ctx);
         me.update_display_chips(&prompt, ctx);
         me.update_ftu_callout_render_state(ctx);
@@ -2009,6 +2019,60 @@ impl AgentInputFooter {
         });
     }
 
+    /// Returns true when this footer's active conversation has running child agents.
+    fn active_conversation_has_in_progress_children(&self, app: &AppContext) -> bool {
+        let history = BlocklistAIHistoryModel::as_ref(app);
+        history
+            .active_conversation_id(self.terminal_view_id)
+            .is_some_and(|conversation_id| {
+                has_in_progress_descendant_conversation(history, conversation_id)
+            })
+    }
+
+    /// Returns true when a child event should refresh this parent's handoff chip.
+    fn is_relevant_orchestration_child_event(
+        &self,
+        event: &BlocklistAIHistoryEvent,
+        app: &AppContext,
+    ) -> bool {
+        let child_conversation_id = match event {
+            BlocklistAIHistoryEvent::UpdatedConversationStatus {
+                conversation_id, ..
+            }
+            | BlocklistAIHistoryEvent::RemoveConversation {
+                conversation_id, ..
+            }
+            | BlocklistAIHistoryEvent::DeletedConversation {
+                conversation_id, ..
+            }
+            | BlocklistAIHistoryEvent::ConversationUsageMetadataUpdated { conversation_id } => {
+                *conversation_id
+            }
+            _ => return false,
+        };
+        let history = BlocklistAIHistoryModel::as_ref(app);
+        let Some(active_conversation_id) = history.active_conversation_id(self.terminal_view_id)
+        else {
+            return false;
+        };
+        descendant_conversation_ids_in_spawn_order(history, active_conversation_id)
+            .contains(&child_conversation_id)
+    }
+
+    /// Updates the handoff chip disabled state and tooltip from child-agent status.
+    fn sync_handoff_to_cloud_button(&self, ctx: &mut ViewContext<Self>) {
+        let disabled = self.active_conversation_has_in_progress_children(ctx);
+        let tooltip = if disabled {
+            HANDOFF_CHILD_AGENTS_IN_PROGRESS_TOOLTIP
+        } else {
+            HANDOFF_TO_CLOUD_TOOLTIP
+        };
+        self.handoff_to_cloud_button.update(ctx, |button, ctx| {
+            button.set_disabled(disabled, ctx);
+            button.set_tooltip(Some(tooltip), ctx);
+        });
+    }
+
     fn update_context_window_button(&mut self, ctx: &mut ViewContext<Self>) {
         if let Some(conversation) =
             BlocklistAIHistoryModel::as_ref(ctx).active_conversation(self.terminal_view_id)
@@ -2604,6 +2668,9 @@ impl TypedActionView for AgentInputFooter {
                 });
             }
             AgentInputFooterAction::HandoffChipClicked => {
+                if self.active_conversation_has_in_progress_children(ctx) {
+                    return;
+                }
                 if FeatureFlag::OzHandoff.is_enabled()
                     && FeatureFlag::HandoffLocalCloud.is_enabled()
                     && cfg!(all(feature = "local_fs", not(target_family = "wasm")))
