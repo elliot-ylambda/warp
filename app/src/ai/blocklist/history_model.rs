@@ -251,7 +251,6 @@ pub struct BlocklistAIHistoryModel {
     persisted_queries: Vec<PersistedAIInput>,
 
     /// Prompt-history candidates seeded once from `ai_queries` at startup via
-    /// [`Self::with_prompt_history`] and appended to as new user-query prompts are submitted
     prompt_history: Vec<(Arc<str>, DateTime<Local>)>,
 
     /// Metadata for both local and ambient agent conversations.
@@ -288,6 +287,7 @@ pub struct BlocklistAIHistoryModel {
 impl BlocklistAIHistoryModel {
     pub(crate) fn new(
         persisted_queries: Vec<PersistedAIInput>,
+        prompt_history: Vec<(String, DateTime<Local>)>,
         multi_agent_conversations: &[AgentConversation],
     ) -> Self {
         #[cfg(feature = "local_fs")]
@@ -299,8 +299,15 @@ impl BlocklistAIHistoryModel {
                     .map(|conn| Arc::new(Mutex::new(conn)))
             });
 
+        let prompt_history = prompt_history
+            .into_iter()
+            .filter(|(text, _)| !text.trim().is_empty())
+            .map(|(text, start_ts)| (Arc::from(text), start_ts))
+            .collect();
+
         let mut model = Self {
             persisted_queries,
+            prompt_history,
             #[cfg(feature = "local_fs")]
             db_connection,
             ..Self::default()
@@ -310,21 +317,6 @@ impl BlocklistAIHistoryModel {
         model.initialize_historical_conversations(multi_agent_conversations);
 
         model
-    }
-
-    /// Seeds [`Self::prompt_history`] with the NLD prompt-history snapshot read from
-    /// `ai_queries` at startup, preserving its oldest-first order. Session prompts are appended
-    /// after these via [`Self::append_session_prompt`].
-    pub(crate) fn with_prompt_history(
-        mut self,
-        prompt_history: Vec<(String, DateTime<Local>)>,
-    ) -> Self {
-        self.prompt_history = prompt_history
-            .into_iter()
-            .filter(|(text, _)| !text.trim().is_empty())
-            .map(|(text, start_ts)| (Arc::from(text), start_ts))
-            .collect();
-        self
     }
 
     #[cfg(test)]
