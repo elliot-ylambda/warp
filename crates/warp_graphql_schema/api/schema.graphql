@@ -919,6 +919,22 @@ type CreateManagedSecretOutput implements Response {
 
 union CreateManagedSecretResult = CreateManagedSecretOutput | UserFacingError
 
+input CreateManagedMcpProxySessionInput {
+  uid: ID!
+}
+
+type CreateManagedMcpProxySessionOutput implements Response {
+  authorizationHeaderName: String!
+  authorizationHeaderValue: String!
+  expiresAt: Time!
+  mcpConfigJson: String!
+  proxyToken: String!
+  proxyUrl: String!
+  responseContext: ResponseContext!
+}
+
+union CreateManagedMcpProxySessionResult = CreateManagedMcpProxySessionOutput | UserFacingError
+
 input CreateNotebookInput {
   aiDocumentId: String
   conversationId: String
@@ -2165,6 +2181,90 @@ type MCPTemplateVariable {
   key: String!
 }
 
+enum ManagedMcpAuthState {
+  AUTH_REQUIRED
+  CONNECTED
+  ERROR
+  EXPIRED
+  NOT_REQUIRED
+}
+
+type ManagedMcpCatalogSummary {
+  lastRefreshedAt: Time
+  prompts: [String!]!
+  resources: [String!]!
+  tools: [String!]!
+}
+
+enum ManagedMcpOwnerScope {
+  TEAM
+  USER
+}
+
+type ManagedMcpResolvedCommandTransport {
+  args: [String!]!
+  command: String!
+  envKeys: [String!]!
+}
+
+union ManagedMcpResolvedTransport = ManagedMcpResolvedCommandTransport | ManagedMcpResolvedUrlTransport
+
+type ManagedMcpResolvedUrlTransport {
+  headerKeys: [String!]!
+  serverUrl: String!
+}
+
+type ManagedMcpServer {
+  authState: ManagedMcpAuthState!
+  catalogSummary: ManagedMcpCatalogSummary!
+  createdAt: Time!
+  displayName: String!
+  lastDiscoveredAt: Time
+  lastError: String
+  ownerScope: ManagedMcpOwnerScope!
+  resolvedTransport: ManagedMcpResolvedTransport
+  status: ManagedMcpStatus!
+  teamUid: ID
+  templatableMcpServerUid: ID!
+  transportKind: ManagedMcpTransportKind!
+  uid: ID!
+  updatedAt: Time!
+  variableBindings: [ManagedMcpVariableBinding!]!
+}
+
+input ManagedMcpServerInput {
+  uid: ID!
+}
+
+type ManagedMcpServerOutput implements Response {
+  responseContext: ResponseContext!
+  server: ManagedMcpServer!
+}
+
+union ManagedMcpServerResult = ManagedMcpServerOutput | UserFacingError
+
+enum ManagedMcpStatus {
+  ACTIVE
+  DRAFT
+  ERROR
+}
+
+enum ManagedMcpTransportKind {
+  COMMAND
+  URL
+}
+
+type ManagedMcpVariableBinding {
+  key: String!
+  managedSecretName: String
+  source: ManagedMcpVariableValueSource!
+}
+
+enum ManagedMcpVariableValueSource {
+  INLINE
+  MANAGED_SECRET
+}
+
 type ManagedSecret {
   createdAt: Time!
 
@@ -2859,6 +2959,7 @@ type RootMutation {
   createFolder(input: CreateFolderInput!, requestContext: RequestContext!): CreateFolderResult!
   createGenericStringObject(input: CreateGenericStringObjectInput!, requestContext: RequestContext!): CreateGenericStringObjectResult!
   createManagedSecret(input: CreateManagedSecretInput!, requestContext: RequestContext!): CreateManagedSecretResult!
+  createManagedMcpProxySession(input: CreateManagedMcpProxySessionInput!, requestContext: RequestContext!): CreateManagedMcpProxySessionResult!
   createNotebook(input: CreateNotebookInput!, requestContext: RequestContext!): CreateNotebookResult!
   createSimpleIntegration(input: CreateSimpleIntegrationInput!, requestContext: RequestContext!): CreateSimpleIntegrationResult!
   createTeam(input: CreateTeamInput!, requestContext: RequestContext!): CreateTeamResult!
@@ -2971,6 +3072,7 @@ type RootQuery {
   Returns all images with the 'dev-' prefix from the warpdotdev organization.
   """
   listWarpDevImages: ListWarpDevImagesResult!
+  managedMcpServer(input: ManagedMcpServerInput!, requestContext: RequestContext!): ManagedMcpServerResult!
   managedSecrets(input: ManagedSecretsInput!, requestContext: RequestContext!): ManagedSecretsResult!
   pricingInfo(requestContext: RequestContext!): PricingInfoResult!
   rerankFragments(input: RerankFragmentsInput!, requestContext: RequestContext!): RerankFragmentsResult!

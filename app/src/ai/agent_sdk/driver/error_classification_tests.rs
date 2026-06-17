@@ -95,6 +95,18 @@ fn mcp_startup_failed_is_failed_with_env_setup_and_per_server_details() {
 }
 
 #[test]
+fn managed_mcp_resolution_failed_is_failed_with_env_setup() {
+    assert_state_and_code(
+        AgentDriverError::ManagedMcpResolutionFailed {
+            warp_id: uuid::Uuid::nil(),
+            reason: "command transport is not supported".to_owned(),
+        },
+        AgentTaskState::Failed,
+        Some(PlatformErrorCode::EnvironmentSetupFailed),
+    );
+}
+
+#[test]
 fn environment_setup_failed_is_failed() {
     assert_state_and_code(
         AgentDriverError::EnvironmentSetupFailed("bad repo".into()),

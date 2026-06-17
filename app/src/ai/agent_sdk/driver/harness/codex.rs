@@ -9,7 +9,8 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tempfile::NamedTempFile;
+use shell_words::quote as shell_quote;
+use tempfile::{NamedTempFile, TempDir};
 use uuid::Uuid;
 use warp_cli::agent::Harness;
 use warp_core::features::FeatureFlag;
@@ -125,15 +126,17 @@ impl ThirdPartyHarness for CodexHarness {
         resolved_env_vars: &HashMap<OsString, OsString>,
         resolved_secrets: &HashMap<String, ManagedSecretValue>,
         resolved_mcp_servers: &HashMap<String, JSONMCPServer>,
+        has_managed_mcp_proxy_credentials: bool,
         third_party_harness_model_config: Option<&HarnessModelConfig>,
     ) -> Result<Box<dyn HarnessRunner>, AgentDriverError> {
         // Prepare the environment config files.
-        prepare_codex_environment_config(
+        let runtime_home = prepare_codex_environment_config(
             working_dir,
             system_prompt,
             resolved_env_vars,
             resolved_secrets,
             resolved_mcp_servers,
+            has_managed_mcp_proxy_credentials,
             third_party_harness_model_config,
         )
         .map_err(|error| AgentDriverError::HarnessConfigSetupFailed {
@@ -169,6 +172,7 @@ impl ThirdPartyHarness for CodexHarness {
             client,
             terminal_driver,
             codex_resume,
+            runtime_home,
         )?))
     }
 }
@@ -196,6 +200,11 @@ fn codex_command(cli_name: &str, session_id: Option<&Uuid>, prompt_path: &str) -
     }
 }
 
+fn prefix_command_with_codex_home(command: String, codex_home: &Path) -> String {
+    let home = codex_home.to_string_lossy();
+    format!("env {CODEX_HOME_ENV}={} {command}", shell_quote(&home))
+}
+
 enum CodexRunnerState {
     Preexec,
     Running {
@@ -209,6 +218,7 @@ struct CodexHarnessRunner {
     cli_name: String,
     /// Held so the temp file is cleaned up when the runner is dropped.
     _temp_prompt_file: NamedTempFile,
+    runtime_home: Option<TempDir>,
     client: Arc<dyn HarnessSupportClient>,
     terminal_driver: ModelHandle<TerminalDriver>,
     state: Mutex<CodexRunnerState>,
@@ -233,9 +243,11 @@ impl CodexHarnessRunner {
         client: Arc<dyn HarnessSupportClient>,
         terminal_driver: ModelHandle<TerminalDriver>,
         resume: Option<CodexResumeInfo>,
+        runtime_home: Option<TempDir>,
     ) -> Result<Self, AgentDriverError> {
         let temp_file = write_temp_file("oz_prompt_", prompt, ".txt")?;
         let prompt_path = temp_file.path().display().to_string();
+        let runtime_home_path = runtime_home.as_ref().map(|dir| dir.path().to_path_buf());
 
         let (session_id, preexisting_conversation_id, transcript_path) = match resume {
             Some(CodexResumeInfo {
@@ -243,11 +255,12 @@ impl CodexHarnessRunner {
                 session_id,
                 envelope,
             }) => {
-                let sessions_root = codex_sessions_root().map_err(|e| {
-                    AgentDriverError::ConfigBuildFailed(
-                        e.context("Failed to resolve codex sessions root"),
-                    )
-                })?;
+                let sessions_root = codex_sessions_root_for_home(runtime_home_path.as_deref())
+                    .map_err(|e| {
+                        AgentDriverError::ConfigBuildFailed(
+                            e.context("Failed to resolve codex sessions root"),
+                        )
+                    })?;
                 let path = write_envelope(&envelope, &sessions_root).map_err(|e| {
                     AgentDriverError::ConfigBuildFailed(
                         e.context("Failed to rehydrate codex transcript"),
@@ -258,7 +271,10 @@ impl CodexHarnessRunner {
             None => (None, None, None),
         };
 
-        let command = codex_command(cli_command, session_id.as_ref(), &prompt_path);
+        let mut command = codex_command(cli_command, session_id.as_ref(), &prompt_path);
+        if let Some(home) = runtime_home_path.as_deref() {
+            command = prefix_command_with_codex_home(command, home);
+        }
 
         let session_id_cell: OnceLock<Uuid> = OnceLock::new();
         if let Some(id) = session_id {
@@ -273,6 +289,7 @@ impl CodexHarnessRunner {
             command,
             cli_name: cli_command.to_string(),
             _temp_prompt_file: temp_file,
+            runtime_home,
             client,
             terminal_driver,
             state: Mutex::new(CodexRunnerState::Preexec),
@@ -289,9 +306,17 @@ impl CodexHarnessRunner {
             return Some(cached.clone());
         }
         let session_id = self.session_id.get().copied()?;
+        let sessions_root = match codex_sessions_root_for_home(
+            self.runtime_home.as_ref().map(|home| home.path()),
+        ) {
+            Ok(root) => root,
+            Err(error) => {
+                log::warn!("Failed to resolve codex sessions root: {error:#}");
+                return None;
+            }
+        };
         let resolved = tokio::task::spawn_blocking(move || -> Option<PathBuf> {
-            let root = codex_sessions_root().ok()?;
-            find_session_file(&root, session_id)
+            find_session_file(&sessions_root, session_id)
         })
         .await
         .ok()
@@ -522,9 +547,23 @@ fn prepare_codex_environment_config(
     resolved_env_vars: &HashMap<OsString, OsString>,
     resolved_secrets: &HashMap<String, ManagedSecretValue>,
     resolved_mcp_servers: &HashMap<String, JSONMCPServer>,
+    has_managed_mcp_proxy_credentials: bool,
     third_party_harness_model_config: Option<&HarnessModelConfig>,
-) -> Result<()> {
-    let codex_dir = codex_config_dir()?;
+) -> Result<Option<TempDir>> {
+    let runtime_home = if has_managed_mcp_proxy_credentials {
+        let dir = tempfile::Builder::new()
+            .prefix("warp_codex_home_")
+            .tempdir()
+            .context("Failed to create temporary Codex home")?;
+        seed_codex_runtime_home(dir.path())?;
+        Some(dir)
+    } else {
+        None
+    };
+    let codex_dir = runtime_home
+        .as_ref()
+        .map(|dir| Ok(dir.path().to_path_buf()))
+        .unwrap_or_else(codex_config_dir)?;
 
     if let Some(prompt) = system_prompt {
         write_codex_agents_override(&codex_dir, prompt)?;
@@ -547,7 +586,7 @@ fn prepare_codex_environment_config(
         third_party_harness_model_config,
         openai_base_url.as_deref(),
     )?;
-    Ok(())
+    Ok(runtime_home)
 }
 
 fn codex_config_dir() -> Result<PathBuf> {
@@ -559,6 +598,38 @@ fn codex_config_dir() -> Result<PathBuf> {
     dirs::home_dir()
         .map(|home| home.join(CODEX_CONFIG_DIR))
         .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))
+}
+
+fn codex_sessions_root_for_home(codex_home: Option<&Path>) -> Result<PathBuf> {
+    match codex_home {
+        Some(home) => Ok(home.join("sessions")),
+        None => codex_sessions_root(),
+    }
+}
+
+fn seed_codex_runtime_home(runtime_home: &Path) -> Result<()> {
+    fs::create_dir_all(runtime_home).with_context(|| {
+        format!(
+            "Failed to create temporary Codex home at {}",
+            runtime_home.display()
+        )
+    })?;
+    let source_dir = codex_config_dir()?;
+    for file_name in [CODEX_AUTH_FILE_NAME, CODEX_CONFIG_TOML_FILE_NAME] {
+        let source = source_dir.join(file_name);
+        if !source.is_file() {
+            continue;
+        }
+        let destination = runtime_home.join(file_name);
+        fs::copy(&source, &destination).with_context(|| {
+            format!(
+                "Failed to seed temporary Codex config {} from {}",
+                destination.display(),
+                source.display()
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn write_codex_agents_override(codex_dir: &Path, system_prompt: &str) -> Result<()> {

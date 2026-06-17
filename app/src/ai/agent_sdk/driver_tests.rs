@@ -5,9 +5,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Result;
+use async_trait::async_trait;
 use futures::channel::oneshot;
 use repo_metadata::{DirectoryWatcher, RepoMetadataEvent, RepoMetadataModel, RepositoryIdentifier};
 use tempfile::TempDir;
+use uuid::Uuid;
 use warp_cli::agent::Harness;
 use warp_cli::skill::SkillSpec;
 use warp_cli::{
@@ -33,7 +36,12 @@ use crate::ai::agent_sdk::task_env_vars;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::cloud_environments::GithubRepo;
 use crate::ai::mcp::parsing::normalize_mcp_json;
+use crate::ai::mcp::JSONTransportType;
 use crate::ai::skills::SkillManager;
+use crate::server::server_api::managed_mcp::{
+    ManagedMcpClient, ManagedMcpProxySession, ManagedMcpServerForResolution, ManagedMcpStatus,
+    ManagedMcpTransportKind,
+};
 use crate::test_util::terminal::{add_window_with_terminal, initialize_app_for_terminal_view};
 
 #[test]
@@ -78,6 +86,135 @@ fn test_normalize_mcp_servers_wrapper() {
 
     // Should return as-is (no command/url at top level)
     assert_eq!(result, input);
+}
+
+#[derive(Clone)]
+enum FakeManagedLookup {
+    Missing,
+    Server(ManagedMcpServerForResolution),
+}
+
+#[derive(Clone)]
+struct FakeManagedMcpClient {
+    lookup: FakeManagedLookup,
+    proxy_json: Option<String>,
+}
+
+#[async_trait]
+impl ManagedMcpClient for FakeManagedMcpClient {
+    async fn get_managed_mcp_server(
+        &self,
+        _uid: Uuid,
+    ) -> Result<Option<ManagedMcpServerForResolution>> {
+        match &self.lookup {
+            FakeManagedLookup::Missing => Ok(None),
+            FakeManagedLookup::Server(server) => Ok(Some(server.clone())),
+        }
+    }
+
+    async fn create_managed_mcp_proxy_session(&self, _uid: Uuid) -> Result<ManagedMcpProxySession> {
+        Ok(ManagedMcpProxySession {
+            mcp_config_json: self
+                .proxy_json
+                .clone()
+                .expect("proxy json should be provided"),
+        })
+    }
+}
+
+fn active_url_managed_server() -> ManagedMcpServerForResolution {
+    ManagedMcpServerForResolution {
+        display_name: "Managed Context".to_owned(),
+        transport_kind: ManagedMcpTransportKind::Url,
+        status: ManagedMcpStatus::Active,
+        last_error: None,
+    }
+}
+
+#[test]
+fn parse_managed_proxy_mcp_config_accepts_mcp_servers_wrapper() {
+    let warp_id = Uuid::new_v4();
+    let json = r#"{
+        "mcpServers": {
+            "managed": {
+                "url": "https://warp.example/mcp/proxy/managed",
+                "headers": {
+                    "Authorization": "Bearer runtime-token"
+                }
+            }
+        }
+    }"#;
+
+    let servers = AgentDriver::parse_managed_proxy_mcp_config(warp_id, json).unwrap();
+    let managed = servers.get("managed").unwrap();
+    match &managed.transport_type {
+        JSONTransportType::SSEServer { url, headers } => {
+            assert_eq!(url, "https://warp.example/mcp/proxy/managed");
+            assert_eq!(
+                headers.get("Authorization").map(String::as_str),
+                Some("Bearer runtime-token")
+            );
+        }
+        JSONTransportType::CLIServer { .. } => panic!("expected URL-backed MCP config"),
+    }
+}
+
+#[tokio::test]
+async fn resolve_managed_mcp_server_map_returns_proxy_config_for_active_url_server() {
+    let warp_id = Uuid::new_v4();
+    let client = FakeManagedMcpClient {
+        lookup: FakeManagedLookup::Server(active_url_managed_server()),
+        proxy_json: Some(
+            r#"{"mcpServers":{"managed":{"url":"https://warp.example/mcp","headers":{"Authorization":"Bearer runtime-token"}}}}"#
+                .to_owned(),
+        ),
+    };
+
+    let servers = AgentDriver::resolve_managed_mcp_server_map(&client, warp_id)
+        .await
+        .unwrap()
+        .expect("managed server should resolve");
+
+    assert_eq!(servers.len(), 1);
+    assert!(servers.contains_key("managed"));
+}
+
+#[tokio::test]
+async fn resolve_managed_mcp_server_map_returns_none_for_absent_managed_row() {
+    let client = FakeManagedMcpClient {
+        lookup: FakeManagedLookup::Missing,
+        proxy_json: None,
+    };
+
+    let result = AgentDriver::resolve_managed_mcp_server_map(&client, Uuid::new_v4())
+        .await
+        .unwrap();
+
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn resolve_managed_mcp_server_map_rejects_command_backed_managed_row() {
+    let warp_id = Uuid::new_v4();
+    let client = FakeManagedMcpClient {
+        lookup: FakeManagedLookup::Server(ManagedMcpServerForResolution {
+            display_name: "Managed Command".to_owned(),
+            transport_kind: ManagedMcpTransportKind::Command,
+            status: ManagedMcpStatus::Active,
+            last_error: None,
+        }),
+        proxy_json: None,
+    };
+
+    let err = AgentDriver::resolve_managed_mcp_server_map(&client, warp_id)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        super::AgentDriverError::ManagedMcpResolutionFailed { .. }
+    ));
+    assert!(err.to_string().contains("command transport"));
 }
 
 #[test]

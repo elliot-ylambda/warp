@@ -66,7 +66,8 @@ use crate::ai::mcp::file_based_manager::{FileBasedMCPManager, FileBasedMCPManage
 use crate::ai::mcp::parsing::{normalize_mcp_json, resolve_json, ParsedTemplatableMCPServerResult};
 use crate::ai::mcp::templatable_manager::TemplatableMCPServerManagerEvent;
 use crate::ai::mcp::{
-    JSONMCPServer, MCPServerState, TemplatableMCPServerInstallation, TemplatableMCPServerManager,
+    JSONMCPServer, JSONTransportType, MCPServerState, TemplatableMCPServerInstallation,
+    TemplatableMCPServerManager,
 };
 use crate::ai::skills::{
     filter_skills_by_spec, read_skills_from_directories, resolve_skill_repos, SkillManager,
@@ -79,6 +80,9 @@ use crate::server::ids::{ServerId, SyncId};
 use crate::server::server_api::ai::{AIClient, TaskStatusUpdate};
 use crate::server::server_api::harness_support::{
     HarnessSupportClient, ResolvePromptAttachedSkill, ResolvePromptRequest,
+};
+use crate::server::server_api::managed_mcp::{
+    ManagedMcpClient, ManagedMcpStatus, ManagedMcpTransportKind,
 };
 use crate::server::server_api::ServerApiProvider;
 use crate::terminal::cli_agent_sessions::plugin_manager::{
@@ -440,6 +444,18 @@ struct GlobalSkillResolution {
     repos: Vec<GithubRepo>,
 }
 
+#[derive(Default)]
+struct ResolvedOzMcpSpecs {
+    existing_uuids: Vec<Uuid>,
+    ephemeral_installations: Vec<TemplatableMCPServerInstallation>,
+    managed_ephemeral_installations: Vec<TemplatableMCPServerInstallation>,
+}
+
+struct ResolvedHarnessMcpServers {
+    servers: HashMap<String, JSONMCPServer>,
+    has_managed_proxy_credentials: bool,
+}
+
 /// Prompt that we initialize an agent driver with. Can represent either a local prompt or
 /// a prompt that we resolve server-side.
 #[derive(Debug, Clone)]
@@ -474,6 +490,8 @@ pub enum AgentDriverError {
     MCPJsonParseError(String),
     #[error("MCP server configuration is missing required variables")]
     MCPMissingVariables,
+    #[error("Failed to resolve managed MCP server {warp_id}: {reason}")]
+    ManagedMcpResolutionFailed { warp_id: Uuid, reason: String },
     #[error("Agent profile \"{0}\" not found")]
     ProfileError(String),
     #[error(
@@ -1006,6 +1024,235 @@ impl AgentDriver {
         Ok(result)
     }
 
+    async fn resolve_mcp_specs_to_json_for_harness(
+        specs: &[MCPSpec],
+        secrets: Arc<HashMap<String, ManagedSecretValue>>,
+        managed_client: &dyn ManagedMcpClient,
+        foreground: &ModelSpawner<Self>,
+    ) -> Result<ResolvedHarnessMcpServers, AgentDriverError> {
+        let mut servers = HashMap::new();
+        let mut has_managed_proxy_credentials = false;
+
+        for spec in specs {
+            match spec {
+                MCPSpec::Uuid(uuid) => {
+                    match Self::resolve_managed_mcp_server_map(managed_client, *uuid).await? {
+                        Some(managed_servers) => {
+                            has_managed_proxy_credentials = true;
+                            servers.extend(managed_servers);
+                        }
+                        None => {
+                            let legacy_servers = Self::resolve_single_legacy_mcp_spec_to_json(
+                                MCPSpec::Uuid(*uuid),
+                                Arc::clone(&secrets),
+                                foreground,
+                            )
+                            .await?;
+                            servers.extend(legacy_servers);
+                        }
+                    }
+                }
+                MCPSpec::Json(_) => {
+                    let inline_servers = Self::resolve_single_legacy_mcp_spec_to_json(
+                        spec.clone(),
+                        Arc::clone(&secrets),
+                        foreground,
+                    )
+                    .await?;
+                    servers.extend(inline_servers);
+                }
+            }
+        }
+
+        Ok(ResolvedHarnessMcpServers {
+            servers,
+            has_managed_proxy_credentials,
+        })
+    }
+
+    async fn resolve_single_legacy_mcp_spec_to_json(
+        spec: MCPSpec,
+        secrets: Arc<HashMap<String, ManagedSecretValue>>,
+        foreground: &ModelSpawner<Self>,
+    ) -> Result<HashMap<String, JSONMCPServer>, AgentDriverError> {
+        let specs = vec![spec];
+        foreground
+            .spawn(move |_, ctx| Self::resolve_mcp_specs_to_json(&specs, &secrets, ctx))
+            .await
+            .map_err(|_| AgentDriverError::InvalidRuntimeState)?
+    }
+
+    async fn resolve_mcp_specs_for_oz(
+        specs: &[MCPSpec],
+        managed_client: &dyn ManagedMcpClient,
+    ) -> Result<ResolvedOzMcpSpecs, AgentDriverError> {
+        let mut resolved = ResolvedOzMcpSpecs::default();
+
+        for spec in specs {
+            match spec {
+                MCPSpec::Uuid(uuid) => {
+                    match Self::resolve_managed_mcp_server_map(managed_client, *uuid).await? {
+                        Some(managed_servers) => {
+                            resolved.managed_ephemeral_installations.extend(
+                                Self::mcp_server_map_to_ephemeral_installations(managed_servers)?,
+                            );
+                        }
+                        None => resolved.existing_uuids.push(*uuid),
+                    }
+                }
+                MCPSpec::Json(_) => {
+                    let (_existing_uuids, ephemeral_installations) =
+                        Self::resolve_mcp_specs(std::slice::from_ref(spec))?;
+                    resolved
+                        .ephemeral_installations
+                        .extend(ephemeral_installations);
+                }
+            }
+        }
+
+        Ok(resolved)
+    }
+
+    async fn resolve_managed_mcp_server_map(
+        client: &dyn ManagedMcpClient,
+        warp_id: Uuid,
+    ) -> Result<Option<HashMap<String, JSONMCPServer>>, AgentDriverError> {
+        let Some(server) = client
+            .get_managed_mcp_server(warp_id)
+            .await
+            .map_err(|error| AgentDriverError::ManagedMcpResolutionFailed {
+                warp_id,
+                reason: format!("{error:#}"),
+            })?
+        else {
+            return Ok(None);
+        };
+
+        if server.transport_kind != ManagedMcpTransportKind::Url {
+            return Err(AgentDriverError::ManagedMcpResolutionFailed {
+                warp_id,
+                reason: format!(
+                    "'{}' uses command transport, which local managed MCP resolution does not support yet",
+                    server.display_name
+                ),
+            });
+        }
+
+        if server.status != ManagedMcpStatus::Active {
+            let last_error = server
+                .last_error
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| format!(": {value}"))
+                .unwrap_or_default();
+            return Err(AgentDriverError::ManagedMcpResolutionFailed {
+                warp_id,
+                reason: format!(
+                    "'{}' is not active (status {}){last_error}",
+                    server.display_name,
+                    Self::managed_mcp_status_label(server.status)
+                ),
+            });
+        }
+
+        let session = client
+            .create_managed_mcp_proxy_session(warp_id)
+            .await
+            .map_err(|error| AgentDriverError::ManagedMcpResolutionFailed {
+                warp_id,
+                reason: format!(
+                    "failed to create proxy session for '{}': {error:#}",
+                    server.display_name
+                ),
+            })?;
+
+        Self::parse_managed_proxy_mcp_config(warp_id, &session.mcp_config_json).map(Some)
+    }
+
+    fn managed_mcp_status_label(status: ManagedMcpStatus) -> &'static str {
+        match status {
+            ManagedMcpStatus::Active => "ACTIVE",
+            ManagedMcpStatus::Draft => "DRAFT",
+            ManagedMcpStatus::Error => "ERROR",
+        }
+    }
+
+    fn parse_managed_proxy_mcp_config(
+        warp_id: Uuid,
+        mcp_config_json: &str,
+    ) -> Result<HashMap<String, JSONMCPServer>, AgentDriverError> {
+        let config: serde_json::Value = serde_json::from_str(mcp_config_json).map_err(|error| {
+            AgentDriverError::ManagedMcpResolutionFailed {
+                warp_id,
+                reason: format!("proxy session returned invalid MCP JSON: {error}"),
+            }
+        })?;
+        let server_map = config
+            .get("mcpServers")
+            .or_else(|| config.get("mcp_servers"))
+            .unwrap_or(&config);
+        let servers: HashMap<String, JSONMCPServer> = serde_json::from_value(server_map.clone())
+            .map_err(|error| AgentDriverError::ManagedMcpResolutionFailed {
+                warp_id,
+                reason: format!("proxy session returned unsupported MCP JSON: {error}"),
+            })?;
+
+        if servers.is_empty() {
+            return Err(AgentDriverError::ManagedMcpResolutionFailed {
+                warp_id,
+                reason: "proxy session did not include any MCP servers".to_owned(),
+            });
+        }
+
+        for (name, server) in &servers {
+            match &server.transport_type {
+                JSONTransportType::SSEServer { url, headers } => {
+                    if url.trim().is_empty() {
+                        return Err(AgentDriverError::ManagedMcpResolutionFailed {
+                            warp_id,
+                            reason: format!("proxy config for '{name}' has an empty URL"),
+                        });
+                    }
+                    if !headers.contains_key("Authorization") {
+                        return Err(AgentDriverError::ManagedMcpResolutionFailed {
+                            warp_id,
+                            reason: format!(
+                                "proxy config for '{name}' is missing the Authorization header"
+                            ),
+                        });
+                    }
+                }
+                JSONTransportType::CLIServer { .. } => {
+                    return Err(AgentDriverError::ManagedMcpResolutionFailed {
+                        warp_id,
+                        reason: format!("proxy config for '{name}' was not URL-backed"),
+                    });
+                }
+            }
+        }
+
+        Ok(servers)
+    }
+
+    fn mcp_server_map_to_ephemeral_installations(
+        servers: HashMap<String, JSONMCPServer>,
+    ) -> Result<Vec<TemplatableMCPServerInstallation>, AgentDriverError> {
+        let json = serde_json::to_string(&servers)
+            .map_err(|error| AgentDriverError::MCPJsonParseError(error.to_string()))?;
+        let parsed_results = ParsedTemplatableMCPServerResult::from_user_json(&json)
+            .map_err(|error| AgentDriverError::MCPJsonParseError(error.to_string()))?;
+
+        parsed_results
+            .into_iter()
+            .map(|result| {
+                result
+                    .templatable_mcp_server_installation
+                    .ok_or(AgentDriverError::MCPMissingVariables)
+            })
+            .collect()
+    }
+
     /// Resolve MCP specs into UUIDs for existing servers and ephemeral installations for inline specs.
     ///
     /// Returns (existing_server_uuids, ephemeral_installations)
@@ -1350,16 +1597,37 @@ impl AgentDriver {
     /// These servers are not persisted and exist only for the duration of the agent run.
     fn start_ephemeral_mcp_servers(
         &self,
+        installations: Vec<TemplatableMCPServerInstallation>,
+        ctx: &mut ModelContext<Self>,
+    ) -> impl Future<Output = Result<(), AgentDriverError>> {
+        self.start_ephemeral_mcp_servers_impl(installations, true, ctx)
+    }
+
+    /// Start already-resolved ephemeral MCP servers. Task secrets are not applied because the
+    /// installation's concrete values came from the managed MCP runtime proxy response.
+    fn start_pre_resolved_ephemeral_mcp_servers(
+        &self,
+        installations: Vec<TemplatableMCPServerInstallation>,
+        ctx: &mut ModelContext<Self>,
+    ) -> impl Future<Output = Result<(), AgentDriverError>> {
+        self.start_ephemeral_mcp_servers_impl(installations, false, ctx)
+    }
+
+    fn start_ephemeral_mcp_servers_impl(
+        &self,
         mut installations: Vec<TemplatableMCPServerInstallation>,
+        apply_task_secrets: bool,
         ctx: &mut ModelContext<Self>,
     ) -> impl Future<Output = Result<(), AgentDriverError>> {
         if installations.is_empty() {
             return Either::Right(future::ready(Ok(())));
         }
 
-        // Inject secrets into the ephemeral MCP server installations.
-        for installation in installations.iter_mut() {
-            installation.apply_secrets(&self.secrets);
+        if apply_task_secrets {
+            // Inject secrets into inline ephemeral MCP server installations.
+            for installation in installations.iter_mut() {
+                installation.apply_secrets(&self.secrets);
+            }
         }
 
         log::info!("Starting {} ephemeral MCP servers...", installations.len());
@@ -1898,15 +2166,21 @@ impl AgentDriver {
         if matches!(&task.harness, HarnessKind::Oz) {
             // Resolve MCP specs into existing server UUIDs and ephemeral installations.
             let mcp_specs = task.mcp_specs.clone();
-            let (existing_uuids, ephemeral_installations) = foreground
-                .spawn(move |_, _| Self::resolve_mcp_specs(&mcp_specs))
-                .await??;
+            let server_api = foreground
+                .spawn(|_, ctx| ServerApiProvider::as_ref(ctx).get())
+                .await?;
+            let ResolvedOzMcpSpecs {
+                existing_uuids,
+                ephemeral_installations,
+                managed_ephemeral_installations,
+            } = Self::resolve_mcp_specs_for_oz(&mcp_specs, server_api.as_ref()).await?;
 
             // Start any requested existing MCP servers first.
             log::info!(
-                "Starting {} existing and {} ephemeral MCP servers",
+                "Starting {} existing, {} inline ephemeral, and {} managed ephemeral MCP servers",
                 existing_uuids.len(),
-                ephemeral_installations.len()
+                ephemeral_installations.len(),
+                managed_ephemeral_installations.len()
             );
 
             let mcp_startup_result = setup_events
@@ -1927,6 +2201,20 @@ impl AgentDriver {
                         let result = foreground
                             .spawn(move |me, ctx| {
                                 me.start_ephemeral_mcp_servers(ephemeral_installations, ctx)
+                            })
+                            .await?
+                            .await;
+                        Self::collect_mcp_degradation(result, &mut degraded)?;
+                    }
+                    // Start managed MCP proxy configs after inline servers. These are already
+                    // resolved and must not receive task-secret substitution.
+                    if !managed_ephemeral_installations.is_empty() {
+                        let result = foreground
+                            .spawn(move |me, ctx| {
+                                me.start_pre_resolved_ephemeral_mcp_servers(
+                                    managed_ephemeral_installations,
+                                    ctx,
+                                )
                             })
                             .await?
                             .await;
@@ -2511,16 +2799,17 @@ impl AgentDriver {
         let secrets_for_harness = Arc::clone(&secrets);
 
         // Resolve MCP specs into harness-native JSON format.
-        let mcp_specs = mcp_specs.to_vec();
-        let resolved_mcp_servers = foreground
-            .spawn(move |_, ctx| Self::resolve_mcp_specs_to_json(&mcp_specs, &secrets, ctx))
-            .await
-            .map_err(|_| AgentDriverError::InvalidRuntimeState)?;
-        let resolved_mcp_servers = resolved_mcp_servers?;
-        if !resolved_mcp_servers.is_empty() {
+        let resolved_mcp_servers = Self::resolve_mcp_specs_to_json_for_harness(
+            mcp_specs,
+            Arc::clone(&secrets),
+            server_api.as_ref(),
+            foreground,
+        )
+        .await?;
+        if !resolved_mcp_servers.servers.is_empty() {
             log::info!(
                 "Resolved {} MCP server(s) for third-party harness",
-                resolved_mcp_servers.len()
+                resolved_mcp_servers.servers.len()
             );
         }
 
@@ -2546,7 +2835,8 @@ impl AgentDriver {
                 resume,
                 &resolved_env_vars,
                 &secrets_for_harness,
-                &resolved_mcp_servers,
+                &resolved_mcp_servers.servers,
+                resolved_mcp_servers.has_managed_proxy_credentials,
                 third_party_harness_model_config.as_ref(),
             )?
             .into();

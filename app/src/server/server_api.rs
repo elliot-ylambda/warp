@@ -4,6 +4,7 @@ mod base_client;
 pub mod block;
 pub mod harness_support;
 pub mod integrations;
+pub(crate) mod managed_mcp;
 pub mod managed_secrets;
 pub mod object;
 pub(crate) mod presigned_upload;

@@ -10,6 +10,7 @@ use uuid::Uuid;
 use super::super::codex_transcript::CodexTranscriptEnvelope;
 use super::*;
 use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::mcp::{JSONMCPServer, JSONTransportType};
 use crate::server::server_api::harness_support::MockHarnessSupportClient;
 
 #[test]
@@ -189,6 +190,7 @@ fn prepare_codex_environment_config_honors_codex_home() {
         &resolved,
         &HashMap::new(),
         &HashMap::new(),
+        false,
         Some(&model_config),
     );
 
@@ -201,7 +203,7 @@ fn prepare_codex_environment_config_honors_codex_home() {
         None => std::env::remove_var(OPENAI_API_KEY_ENV),
     }
 
-    result.unwrap();
+    assert!(result.unwrap().is_none());
     assert_eq!(
         fs::read_to_string(codex_home.join(CODEX_AGENTS_OVERRIDE_FILE_NAME)).unwrap(),
         "system prompt"
@@ -213,6 +215,78 @@ fn prepare_codex_environment_config_honors_codex_home() {
     assert_eq!(cfg["model"].as_str(), Some("gpt-5.5"));
     assert!(!cfg.contains_key("openai_base_url"));
     assert!(!tmp.path().join(CODEX_CONFIG_DIR).exists());
+}
+
+#[test]
+#[serial_test::serial]
+fn prepare_codex_environment_config_with_managed_mcp_uses_temp_home() {
+    let tmp = TempDir::new().unwrap();
+    let source_home = tmp.path().join("codex-home");
+    let working_dir = tmp.path().join("workspace");
+    fs::create_dir_all(&source_home).unwrap();
+    fs::create_dir_all(&working_dir).unwrap();
+    fs::write(
+        source_home.join(CODEX_CONFIG_TOML_FILE_NAME),
+        "model = \"existing\"\n",
+    )
+    .unwrap();
+    fs::write(
+        source_home.join(CODEX_AUTH_FILE_NAME),
+        r#"{"tokens":{"access_token":"existing"}}"#,
+    )
+    .unwrap();
+
+    let prev_codex_home = std::env::var(CODEX_HOME_ENV).ok();
+    let prev_openai_api_key = std::env::var(OPENAI_API_KEY_ENV).ok();
+    std::env::set_var(CODEX_HOME_ENV, &source_home);
+    std::env::remove_var(OPENAI_API_KEY_ENV);
+
+    let mcp_servers = HashMap::from([(
+        "managed".to_owned(),
+        JSONMCPServer {
+            transport_type: JSONTransportType::SSEServer {
+                url: "https://warp.example/mcp/proxy/managed".to_owned(),
+                headers: HashMap::from([(
+                    "Authorization".to_owned(),
+                    "Bearer runtime-token".to_owned(),
+                )]),
+            },
+        },
+    )]);
+    let runtime_home = prepare_codex_environment_config(
+        &working_dir,
+        None,
+        &HashMap::new(),
+        &HashMap::new(),
+        &mcp_servers,
+        true,
+        None,
+    )
+    .unwrap()
+    .expect("managed MCP config should allocate a runtime Codex home");
+
+    match prev_codex_home {
+        Some(v) => std::env::set_var(CODEX_HOME_ENV, v),
+        None => std::env::remove_var(CODEX_HOME_ENV),
+    }
+    match prev_openai_api_key {
+        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
+        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+    }
+
+    assert_eq!(
+        fs::read_to_string(source_home.join(CODEX_CONFIG_TOML_FILE_NAME)).unwrap(),
+        "model = \"existing\"\n"
+    );
+    let cfg = read_codex_config(&runtime_home.path().join(CODEX_CONFIG_TOML_FILE_NAME));
+    assert_eq!(
+        cfg["mcp_servers"]["managed"]["http_headers"]["Authorization"].as_str(),
+        Some("Bearer runtime-token")
+    );
+    let auth: Value =
+        serde_json::from_slice(&fs::read(runtime_home.path().join(CODEX_AUTH_FILE_NAME)).unwrap())
+            .unwrap();
+    assert_eq!(auth["tokens"]["access_token"], "existing");
 }
 
 fn read_codex_config(path: &std::path::Path) -> toml::Table {
