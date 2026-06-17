@@ -6,7 +6,8 @@ use warp_editor::editor::NavigationKey;
 use warpui::elements::{
     Border, ChildView, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
     CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex, MainAxisSize, MouseStateHandle,
-    ParentElement, Radius, SavePosition, ScrollTarget, ScrollToPositionMode, ScrollbarWidth, Text,
+    ParentElement, Radius, SavePosition, ScrollTarget, ScrollToPositionMode, ScrollbarWidth,
+    Shrinkable, Text,
 };
 use warpui::fonts::FamilyId;
 use warpui::ui_components::button::ButtonVariant;
@@ -30,11 +31,13 @@ const INPUT_WIDTH: f32 = 480.;
 const ENDPOINT_NAME_SCROLL_POSITION_ID: &str = "custom_endpoint_name";
 const ENDPOINT_URL_SCROLL_POSITION_ID: &str = "custom_endpoint_url";
 const API_KEY_SCROLL_POSITION_ID: &str = "custom_endpoint_api_key";
+const ACTIONS_POSITION_ID: &str = "custom_endpoint_actions";
 
 const MODEL_ROW_SPACING: f32 = 16.;
 const REMOVE_MODEL_BUTTON_SPACING: f32 = 8.;
 const REMOVE_MODEL_BUTTON_COL_WIDTH: f32 = 20.;
 const MODAL_SCROLLBAR_WIDTH: f32 = 4.;
+const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 24.;
 const MODEL_INPUT_WIDTH: f32 = (INPUT_WIDTH - MODEL_ROW_SPACING) / 2.;
 fn model_row_scroll_position_id(index: usize) -> String {
     format!("custom_endpoint_model_row_{index}")
@@ -950,10 +953,11 @@ impl View for CustomEndpointModal {
             .finish(),
         );
 
-        column.add_child(buttons_row.finish());
-        ClippedScrollable::vertical(
+        let scrollable_content = ClippedScrollable::vertical(
             self.scroll_state.clone(),
-            column.finish(),
+            Container::new(column.finish())
+                .with_margin_right(SCROLL_CONTENT_RIGHT_MARGIN)
+                .finish(),
             ScrollbarWidth::Custom(MODAL_SCROLLBAR_WIDTH),
             theme.nonactive_ui_text_color().into(),
             theme.active_ui_text_color().into(),
@@ -962,7 +966,21 @@ impl View for CustomEndpointModal {
         .with_overlayed_scrollbar()
         .with_padding_start(0.)
         .with_padding_end(0.)
-        .finish()
+        .finish();
+        let buttons_row = SavePosition::new(
+            Container::new(buttons_row.finish())
+                .with_margin_right(SCROLL_CONTENT_RIGHT_MARGIN)
+                .finish(),
+            ACTIONS_POSITION_ID,
+        )
+        .for_single_frame()
+        .finish();
+
+        Flex::column()
+            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+            .with_child(Shrinkable::new(1., scrollable_content).finish())
+            .with_child(buttons_row)
+            .finish()
     }
 }
 

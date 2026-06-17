@@ -1678,7 +1678,7 @@ impl AISettingsPageView {
                     top: 0.,
                     bottom: 24.,
                     left: 24.,
-                    right: 24.,
+                    right: 0.,
                 }),
                 ..Default::default()
             })

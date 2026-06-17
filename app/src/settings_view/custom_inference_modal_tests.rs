@@ -133,11 +133,71 @@ fn modal_with_many_models_lays_out() {
 fn model_row_inputs_align_and_controls_fit_gutter() {
     assert_eq!(MODEL_INPUT_WIDTH * 2. + MODEL_ROW_SPACING, INPUT_WIDTH);
     assert_eq!(
-        REMOVE_MODEL_BUTTON_SPACING + REMOVE_MODEL_BUTTON_COL_WIDTH + MODAL_SCROLLBAR_WIDTH,
-        32.
+        REMOVE_MODEL_BUTTON_SPACING
+            + REMOVE_MODEL_BUTTON_COL_WIDTH
+            + SCROLL_CONTENT_RIGHT_MARGIN
+            + MODAL_SCROLLBAR_WIDTH,
+        56.
     );
 }
 
+#[test]
+fn action_row_remains_fixed_when_form_scrolls() {
+    App::test((), |mut app| async move {
+        init_modal_test_models(&mut app);
+        let endpoint = endpoint_with_models(20);
+        let (window_id, modal) = app.add_window(WindowStyle::NotStealFocus, move |ctx| {
+            let body = ctx.add_typed_action_view(|ctx| {
+                CustomEndpointModal::new(Some(&endpoint), Some(0), ctx)
+            });
+            Modal::new(Some("Edit custom endpoint".to_string()), body, ctx)
+                .with_modal_style(UiComponentStyles {
+                    width: Some(560.),
+                    ..Default::default()
+                })
+                .with_max_height_percentage(0.8)
+        });
+        let body = modal.read(&app, |modal, _| modal.body().clone());
+        let invalidation = WindowInvalidation {
+            updated: HashSet::from([
+                app.root_view_id(window_id).expect("root view should exist"),
+                body.id(),
+            ]),
+            ..Default::default()
+        };
+
+        let action_row_position = app.update(|ctx| {
+            let presenter = ctx.presenter(window_id).expect("presenter should exist");
+            let mut presenter = presenter.borrow_mut();
+            presenter.invalidate(invalidation.clone(), ctx);
+            presenter.build_scene(vec2f(560., 600.), 1., None, ctx);
+            presenter
+                .position_cache()
+                .get_position(ACTIONS_POSITION_ID)
+                .expect("action row position should exist")
+        });
+        body.update(&mut app, |body, ctx| {
+            body.scroll_state.scroll_to(Pixels::new(f32::MAX));
+            ctx.notify();
+        });
+
+        let scrolled_action_row_position = app.update(|ctx| {
+            let presenter = ctx.presenter(window_id).expect("presenter should exist");
+            let mut presenter = presenter.borrow_mut();
+            presenter.invalidate(invalidation, ctx);
+            presenter.build_scene(vec2f(560., 600.), 1., None, ctx);
+            presenter
+                .position_cache()
+                .get_position(ACTIONS_POSITION_ID)
+                .expect("action row position should exist")
+        });
+        assert!(body.read(&app, |body, _| body.scroll_state.scroll_start()) > Pixels::zero());
+        assert_eq!(
+            action_row_position, scrolled_action_row_position,
+            "action row should remain fixed while form content scrolls"
+        );
+    })
+}
 #[test]
 fn focus_editor_scrolls_whole_form_to_field() {
     App::test((), |mut app| async move {
