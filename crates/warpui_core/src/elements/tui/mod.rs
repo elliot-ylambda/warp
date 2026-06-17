@@ -28,13 +28,6 @@ pub use buffer::{Cell, TuiBuffer, TuiStyle};
 pub use event::{TuiDispatchEventResult, TuiEventContext, TuiEventDispatchResult};
 pub use geometry::{TuiConstraint, TuiRect, TuiSize};
 
-/// What a [`TuiView`](crate::TuiView) renders to: a boxed element tree.
-///
-/// Unlike the legacy out-of-crate TUI backend, the core stores and renders
-/// this output fully typed — there is no `Any` erasure or downcasting anywhere
-/// in the TUI render path.
-pub type TuiRenderOutput = Box<dyn TuiElement>;
-
 /// A node in the renderable tree: it measures itself against a constraint,
 /// then paints into a sub-rectangle of the buffer.
 ///
@@ -91,34 +84,6 @@ pub trait TuiElement {
     }
 }
 
-impl TuiElement for () {
-    fn layout(&mut self, _constraint: TuiConstraint) -> TuiSize {
-        TuiSize::ZERO
-    }
-
-    fn render(&self, _area: TuiRect, _buffer: &mut TuiBuffer) {}
-
-    fn desired_height(&self, _width: u16) -> u16 {
-        0
-    }
-}
-
-/// An empty element, useful as a placeholder render output.
-#[derive(Default)]
-pub struct TuiEmpty;
-
-impl TuiElement for TuiEmpty {
-    fn layout(&mut self, _constraint: TuiConstraint) -> TuiSize {
-        TuiSize::ZERO
-    }
-
-    fn render(&self, _area: TuiRect, _buffer: &mut TuiBuffer) {}
-
-    fn desired_height(&self, _width: u16) -> u16 {
-        0
-    }
-}
-
 /// Threads the current view ancestry through the element tree during the
 /// presenter's child-view recursion, recording each child view's parent so the
 /// shared core can attribute events and actions to the right view.
@@ -163,7 +128,3 @@ impl<'a> TuiPresentationContext<'a> {
             .expect("a child view is entered before it is exited");
     }
 }
-
-#[cfg(test)]
-#[path = "mod_test.rs"]
-mod tests;
