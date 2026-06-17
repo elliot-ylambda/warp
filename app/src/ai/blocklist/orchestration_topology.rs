@@ -70,6 +70,30 @@ pub fn collect_descendant_conversation_ids_in_spawn_order(
     }
 }
 
+/// Returns `true` if `orchestrator_id` has at least one *local* (non-remote)
+/// orchestrated descendant conversation.
+///
+/// Local→cloud handoff forks only the orchestrator conversation to a cloud
+/// pane; any local child conversations (and their running local subagent
+/// processes) would be left behind and orphaned. Surfaces that offer the
+/// "Hand off to cloud" affordance use this to disable it while local children
+/// exist. Remote children (`AIConversation::is_remote_child`) already run on
+/// cloud workers, so they don't block handoff. Descendants that aren't loaded
+/// into memory are conservatively ignored (we can't classify them), which
+/// avoids over-disabling the affordance.
+pub fn has_local_orchestrated_children(
+    history: &BlocklistAIHistoryModel,
+    orchestrator_id: AIConversationId,
+) -> bool {
+    descendant_conversation_ids_in_spawn_order(history, orchestrator_id)
+        .into_iter()
+        .any(|id| {
+            history
+                .conversation(&id)
+                .is_some_and(|conversation| !conversation.is_remote_child())
+        })
+}
+
 /// Returns descendants in the canonical orchestration pill order:
 ///   1) pinned children
 ///   2) unpinned children

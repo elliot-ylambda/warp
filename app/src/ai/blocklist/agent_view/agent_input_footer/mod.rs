@@ -52,6 +52,7 @@ pub(crate) use self::environment_selector::{
 };
 use crate::ai::blocklist::agent_view::is_in_cloud_context;
 use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
+use crate::ai::blocklist::orchestration_topology::has_local_orchestrated_children;
 use crate::ai::blocklist::prompt::prompt_alert::{PromptAlertEvent, PromptAlertView};
 use crate::ai::blocklist::usage::icon_for_context_window_usage;
 use crate::ai::blocklist::BlocklistAIInputModel;
@@ -126,6 +127,10 @@ const FAST_FORWARD_LOCKED_TOOLTIP: &str =
 
 const START_REMOTE_CONTROL_TOOLTIP: &str = "Start remote control";
 const START_REMOTE_CONTROL_LOGIN_REQUIRED_TOOLTIP: &str = "Log in to use /remote-control";
+
+const HANDOFF_TO_CLOUD_TOOLTIP: &str = "Hand off to cloud (or type &)";
+const HANDOFF_TO_CLOUD_LOCAL_CHILDREN_DISABLED_TOOLTIP: &str =
+    "Can't hand off to cloud while local subagents are running";
 
 const CLOUD_MODE_V2_FOOTER_GAP: f32 = 4.;
 
@@ -372,7 +377,7 @@ impl AgentInputFooter {
         let handoff_to_cloud_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new("", AgentInputButtonTheme)
                 .with_icon(Icon::UploadCloud)
-                .with_tooltip("Hand off to cloud (or type &)")
+                .with_tooltip(HANDOFF_TO_CLOUD_TOOLTIP)
                 .with_size(button_size)
                 .with_tooltip_alignment(TooltipAlignment::Left)
                 .on_click(|ctx| {
@@ -769,6 +774,12 @@ impl AgentInputFooter {
         ctx.subscribe_to_model(
             &BlocklistAIHistoryModel::handle(ctx),
             |me, _, event, ctx| {
+                // Recompute the handoff gate on *any* history change, even ones
+                // scoped to a different terminal view: orchestrated child
+                // conversations live in other tabs, so a child spawned or
+                // finishing there must still update this orchestrator footer.
+                // This must run before the terminal-view-id early return below.
+                me.sync_handoff_to_cloud_button(ctx);
                 if event
                     .terminal_view_id()
                     .is_some_and(|id| id != me.terminal_view_id)
@@ -878,6 +889,7 @@ impl AgentInputFooter {
         };
         me.sync_fast_forward_button(ctx);
         me.sync_remote_control_button(ctx);
+        me.sync_handoff_to_cloud_button(ctx);
         me.update_context_window_button(ctx);
         me.update_display_chips(&prompt, ctx);
         me.update_ftu_callout_render_state(ctx);
@@ -2009,6 +2021,34 @@ impl AgentInputFooter {
         });
     }
 
+    /// Returns `true` if the active conversation in this footer's terminal view
+    /// is an orchestrator with at least one *local* (non-remote) child. Local→
+    /// cloud handoff forks only the orchestrator conversation, so handing off
+    /// while local children are running would orphan them.
+    fn handoff_blocked_by_local_children(&self, app: &AppContext) -> bool {
+        let history = BlocklistAIHistoryModel::as_ref(app);
+        history
+            .active_conversation_id(self.terminal_view_id)
+            .is_some_and(|id| has_local_orchestrated_children(history, id))
+    }
+
+    /// Disable the "Hand off to cloud" chip and swap its tooltip while the
+    /// active conversation has local orchestrated children, since local→cloud
+    /// handoff doesn't bring those local children (and their running subagent
+    /// processes) along.
+    fn sync_handoff_to_cloud_button(&self, ctx: &mut ViewContext<Self>) {
+        let has_local_children = self.handoff_blocked_by_local_children(ctx);
+        let tooltip = if has_local_children {
+            HANDOFF_TO_CLOUD_LOCAL_CHILDREN_DISABLED_TOOLTIP
+        } else {
+            HANDOFF_TO_CLOUD_TOOLTIP
+        };
+        self.handoff_to_cloud_button.update(ctx, |button, ctx| {
+            button.set_disabled(has_local_children, ctx);
+            button.set_tooltip(Some(tooltip), ctx);
+        });
+    }
+
     fn update_context_window_button(&mut self, ctx: &mut ViewContext<Self>) {
         if let Some(conversation) =
             BlocklistAIHistoryModel::as_ref(ctx).active_conversation(self.terminal_view_id)
@@ -2604,6 +2644,13 @@ impl TypedActionView for AgentInputFooter {
                 });
             }
             AgentInputFooterAction::HandoffChipClicked => {
+                // Don't hand off to cloud while local orchestrated children are
+                // running — local→cloud handoff would orphan them. The footer
+                // chip is also disabled in this state; this guards the action
+                // path so the dispatch can't slip through.
+                if self.handoff_blocked_by_local_children(ctx) {
+                    return;
+                }
                 if FeatureFlag::OzHandoff.is_enabled()
                     && FeatureFlag::HandoffLocalCloud.is_enabled()
                     && cfg!(all(feature = "local_fs", not(target_family = "wasm")))
