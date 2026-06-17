@@ -226,8 +226,9 @@ fn process_ai_queries_for_uparrow_prompt_keeps_newest_capped_oldest_first() {
 #[test]
 fn process_ai_queries_for_uparrow_prompt_keeps_all_when_under_cap() {
     // Fewer than the cap: everything is kept, order preserved.
-    let queries: Vec<PersistedAIInput> =
-        (0..3).map(|i| (*make_query(&format!("q{i}"))).clone()).collect();
+    let queries: Vec<PersistedAIInput> = (0..3)
+        .map(|i| (*make_query(&format!("q{i}"))).clone())
+        .collect();
 
     let kept = process_ai_queries_for_uparrow_prompt(queries);
 

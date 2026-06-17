@@ -2755,10 +2755,11 @@ fn read_sqlite_data(
     // Seed up-arrow prompt history and (optionally) NLD prompt-history matching from a single
     // SQLite read, deriving both from the same in-memory query vector instead of reading twice.
     let recent_ai_queries = read_recent_ai_queries(conn)?;
-    let nld_prompts = FeatureFlag::NldPromptHistoryMatch
-        .is_enabled()
-        .then(|| process_ai_queries_for_nld_history_match(&recent_ai_queries))
-        .unwrap_or_default();
+    let nld_prompts = if FeatureFlag::NldPromptHistoryMatch.is_enabled() {
+        process_ai_queries_for_nld_history_match(&recent_ai_queries)
+    } else {
+        Vec::new()
+    };
     let ai_queries = process_ai_queries_for_uparrow_prompt(recent_ai_queries);
 
     let codebase_indices = get_all_codebase_index_metadata(conn)?;

@@ -98,7 +98,7 @@ const MAX_AI_QUERIES_FOR_UPARROW: usize = 100;
 const MAX_AI_QUERIES_FOR_NLD: usize = 2000;
 
 /// Reads the most recent [`MAX_AI_QUERIES_READ_LIMIT`] AI queries from the `ai_queries` table,
-/// oldest-first (ascending by submission). 
+/// oldest-first (ascending by submission).
 pub(super) fn read_recent_ai_queries(
     conn: &mut SqliteConnection,
 ) -> Result<Vec<PersistedAIInput>, diesel::result::Error> {
@@ -131,7 +131,9 @@ pub(super) fn process_ai_queries_for_uparrow_prompt(
 pub(super) fn process_ai_queries_for_nld_history_match(
     recent_ai_queries: &[PersistedAIInput],
 ) -> Vec<(String, DateTime<Local>)> {
-    let start = recent_ai_queries.len().saturating_sub(MAX_AI_QUERIES_FOR_NLD);
+    let start = recent_ai_queries
+        .len()
+        .saturating_sub(MAX_AI_QUERIES_FOR_NLD);
     recent_ai_queries[start..]
         .iter()
         .filter_map(|query| {
