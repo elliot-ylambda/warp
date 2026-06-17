@@ -68,7 +68,7 @@ This is meant to just be a high-level overview for alignment, more details will 
 Team-managed configuration is split into public metadata and secrets.
 - **Public metadata** syncs from the server down to every member's client through the existing workspace-settings channel and never includes secret values. What syncs differs by provider type:
   - **BYOK (OpenAI/Anthropic/Google):** just a per-provider boolean — whether the team has a key configured. The provider is an already-known, built-in identity, so no value or id is synced. That boolean drives the member's "configured" checkmark and tells the picker which standard models can route through a team key.
-  - **Custom endpoints:** Endpoint name + URL, and each model's name, alias, and reference id (`config_key`) — since the client knows nothing about an admin-defined endpoint otherwise. Only the endpoint's API key is withheld.
+  - **Custom endpoints:** Endpoint name, and each model's name, alias, and reference id (`config_key`) — since the client knows nothing about an admin-defined endpoint otherwise. Only the endpoint's API key is withheld.
   This metadata is what lets a member's model picker show team-provided models without the client ever holding a key.
 - **Secrets**: first-party provider keys and endpoint API keys — are stored server-side, scoped to the team. They are never synced to clients. At request time the server resolves that reference against the team's stored secrets for the authenticated member, injects the matching key, and routes — at the same boundary that redacts secrets from logs. Two reference paths:
 - **First-party keys**: The server resolves by provider and priority: a user key present on the request wins; otherwise the team's stored key for that provider is injected.
