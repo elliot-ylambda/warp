@@ -14,13 +14,14 @@
 //!   [`TuiElement::dispatch_event`]. (The crossterm → warp event *conversion*
 //!   lives with the runtime, in `crate::runtime`.)
 //! - The concrete elements: [`TuiText`], [`TuiColumn`], [`TuiContainer`],
-//!   [`TuiChildView`], and [`TuiEventHandler`].
+//!   [`TuiCenter`], [`TuiChildView`], and [`TuiEventHandler`].
 
 use std::collections::HashMap;
 
 use crate::{AppContext, EntityId, Event};
 
 mod buffer;
+mod center;
 mod child_view;
 mod column;
 mod container;
@@ -30,6 +31,7 @@ mod geometry;
 mod text;
 
 pub use buffer::{Cell, Color, Modifier, TuiBuffer, TuiBufferExt, TuiStyle};
+pub use center::TuiCenter;
 pub use child_view::TuiChildView;
 pub use column::TuiColumn;
 pub use container::TuiContainer;
