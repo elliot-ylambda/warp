@@ -11,7 +11,7 @@ use warp_core::user_preferences::GetUserPreferences;
 use warp_multi_agent_api as api;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
 
-use super::custom_auto_models::{self, CustomAutoModel, CustomAutoModelSource};
+use super::custom_auto_models::{self, CustomAutoModel};
 use super::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::auth::auth_manager::{AuthManager, AuthManagerEvent};
 use crate::auth::AuthStateProvider;
@@ -935,22 +935,48 @@ impl LLMPreferences {
         let mut models = Vec::new();
         let mut seen = HashSet::new();
         for id in [base_id, coding_id] {
-            if let Some(model) = self.custom_auto_model_for_id(id) {
-                if seen.insert(model.config_key()) {
-                    models.push(model.to_proto());
+            if let Some(entry) = self.custom_auto_proto_entry(id) {
+                if seen.insert(entry.config_key.clone()) {
+                    models.push(entry);
                 }
             }
         }
         (!models.is_empty()).then_some(api::request::settings::CustomAutoModels { models })
     }
 
-    /// Rebuilds `custom_auto_models`/`custom_auto_llms` from the local
-    /// `model_configs/` directory and cloud objects, applying local-wins
-    /// precedence (inv. 19), then notifies subscribers.
+    /// Builds the proto registry entry for a selected custom-auto id: the full
+    /// definition inline for a local YAML auto, or just the `cloud_uid` for a cloud
+    /// auto (delivered via the available-LLMs fetch, recognized by the
+    /// `custom-auto:cloud:` prefix). Returns `None` for non-custom-auto ids.
+    fn custom_auto_proto_entry(
+        &self,
+        id: &LLMId,
+    ) -> Option<api::request::settings::custom_auto_models::CustomAutoModel> {
+        if let Some(model) = self.custom_auto_model_for_id(id) {
+            return Some(model.to_proto());
+        }
+        let uid = custom_auto_models::cloud_uid_from_id(id.as_str())?;
+        Some(
+            api::request::settings::custom_auto_models::CustomAutoModel {
+                config_key: id.as_str().to_owned(),
+                // The server resolves cloud autos by `cloud_uid` and already holds the
+                // GSO name; the (sensitive) `name` field is left empty on the wire.
+                name: String::new(),
+                source: Some(
+                    api::request::settings::custom_auto_models::custom_auto_model::Source::CloudUid(
+                        uid.to_owned(),
+                    ),
+                ),
+            },
+        )
+    }
+
+    /// Rebuilds the local `custom_auto_models`/`custom_auto_llms` from the
+    /// `model_configs/` directory, then notifies subscribers. Cloud/team autos
+    /// arrive separately as `LLMInfo` entries in the available-LLMs fetch.
     fn rebuild_custom_auto_models(&mut self, ctx: &mut ModelContext<Self>) {
         let local = WarpConfig::as_ref(ctx).custom_auto_models().clone();
-        let cloud = self.cloud_custom_auto_models();
-        self.custom_auto_models = merge_custom_autos(local, cloud);
+        self.custom_auto_models = dedup_custom_autos(local);
         self.custom_auto_llms = self
             .custom_auto_models
             .iter()
@@ -959,23 +985,13 @@ impl LLMPreferences {
         ctx.emit(LLMPreferencesEvent::UpdatedAvailableLLMs);
     }
 
-    /// Cloud-backed custom auto models (personal + team). Cloud GSO loading is
-    /// wired separately; returns an empty list until then.
-    fn cloud_custom_auto_models(&self) -> Vec<CustomAutoModel> {
-        Vec::new()
-    }
-
     /// Resets any persisted *local* custom-auto selection that no longer resolves
     /// to a loaded definition, so a deleted/invalid local config falls back to the
     /// default model and the visible selection updates (inv. 31). Scoped to local
     /// ids so a cloud selection isn't reset by a local reload.
     fn reconcile_stale_custom_auto_selection(&mut self, ctx: &mut ModelContext<Self>) {
-        let valid_local: HashSet<LLMId> = self
-            .custom_auto_models
-            .iter()
-            .filter(|m| matches!(m.source, CustomAutoModelSource::Local))
-            .map(|m| m.llm_id())
-            .collect();
+        let valid_local: HashSet<LLMId> =
+            self.custom_auto_models.iter().map(|m| m.llm_id()).collect();
 
         let mut updated_agent_mode = false;
         let mut updated_coding = false;
@@ -1522,25 +1538,20 @@ fn custom_llm_info_from(endpoint: &CustomEndpoint, model: &CustomEndpointModel) 
     }
 }
 
-/// Merges local and cloud custom auto models into a single picker list.
-///
-/// Local entries are listed first so local takes precedence (inv. 19); both
-/// sources still contribute distinct entries (distinct `config_key`s) so name
-/// collisions remain individually selectable. De-duplicates by `config_key`,
-/// keeping the first occurrence (so an intra-source name collision does not
-/// silently overwrite an earlier entry, inv. 20).
-fn merge_custom_autos(
-    local: Vec<CustomAutoModel>,
-    cloud: Vec<CustomAutoModel>,
-) -> Vec<CustomAutoModel> {
-    let mut merged = Vec::with_capacity(local.len() + cloud.len());
+/// De-duplicates local custom auto models by `config_key`, keeping the first
+/// occurrence so an intra-source name collision does not silently overwrite an
+/// earlier entry (inv. 20). Cloud/team autos arrive separately via the
+/// available-LLMs fetch and are merged at the picker level, where local entries
+/// take precedence (inv. 19).
+fn dedup_custom_autos(local: Vec<CustomAutoModel>) -> Vec<CustomAutoModel> {
+    let mut deduped = Vec::with_capacity(local.len());
     let mut seen = HashSet::new();
-    for model in local.into_iter().chain(cloud) {
+    for model in local {
         if seen.insert(model.config_key()) {
-            merged.push(model);
+            deduped.push(model);
         }
     }
-    merged
+    deduped
 }
 
 /// Gets the last cached LLM metadata.

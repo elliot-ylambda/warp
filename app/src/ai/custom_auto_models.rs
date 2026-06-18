@@ -1,12 +1,16 @@
 //! Custom auto models: user-defined "auto" models (named routers) that resolve to
 //! a concrete model per task.
 //!
-//! This module holds the portable, source-agnostic definition used across the
-//! client: it is produced from a local YAML config (see [`parse_model_configs_yaml`])
-//! and from cloud GSO objects, surfaced in the model picker as synthetic
-//! [`LLMInfo`] entries, and serialized into outbound agent requests
-//! (`Request.Settings.custom_auto_models`) mirroring the `custom_model_providers`
-//! inline-registry pattern.
+//! This module holds the portable definition for **local** (YAML-authored) custom
+//! auto models: produced from a local YAML config (see [`parse_model_configs_yaml`]),
+//! surfaced in the model picker as synthetic [`LLMInfo`] entries, and serialized
+//! inline into outbound agent requests (`Request.Settings.custom_auto_models`)
+//! mirroring the `custom_model_providers` inline-registry pattern.
+//!
+//! Cloud/team custom autos are delivered separately, as `LLMInfo` entries in the
+//! available-LLMs fetch (id = `custom-auto:cloud:<uid>`); at request time the
+//! client reverses that id into a `cloud_uid` (see
+//! `llms::LLMPreferences::custom_auto_models_for_request`).
 //!
 //! See `specs/custom-auto-models/PRODUCT.md` and `TECH.md`. Invariant numbers in
 //! comments (e.g. "inv. 27") refer to the product spec.
@@ -21,26 +25,14 @@ use warp_multi_agent_api as api;
 
 use super::llms::{LLMContextWindow, LLMId, LLMInfo, LLMProvider, LLMUsageMetadata};
 
-/// The `config_key` prefix for custom auto models. The picker `LLMId` for a custom
-/// auto is its `config_key`, so this prefix lets us recognize a selection as a
-/// custom auto and distinguish it from concrete models and built-in autos.
+/// The `config_key` prefix shared by all custom auto models. Lets us recognize a
+/// selection as a custom auto and distinguish it from concrete and built-in autos.
 pub const CUSTOM_AUTO_PREFIX: &str = "custom-auto:";
-
-/// Where a custom auto model came from. Determines `config_key` identity and how
-/// the definition is sent to the server (inline vs. cloud uid).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CustomAutoModelSource {
-    /// Authored in a local YAML file under `~/.warp/model_configs/`.
-    Local,
-    /// Backed by a cloud GSO (personal or team owned).
-    Cloud {
-        /// The GSO uid the server fetches to resolve the definition.
-        uid: String,
-        /// A short owner label for picker disambiguation (e.g. "Personal" or a
-        /// team name). `None` falls back to a generic "Cloud" label.
-        owner_label: Option<String>,
-    },
-}
+/// The `config_key` prefix for *local* (YAML-authored) custom auto models.
+pub const LOCAL_CUSTOM_AUTO_PREFIX: &str = "custom-auto:local:";
+/// The `config_key` prefix for *cloud* custom auto models. Cloud autos arrive as
+/// `LLMInfo` entries in the available-LLMs fetch with id `custom-auto:cloud:<uid>`.
+pub const CLOUD_CUSTOM_AUTO_PREFIX: &str = "custom-auto:cloud:";
 
 /// The routing strategy for a custom auto model. Exactly one is set (inv. 18).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,13 +75,11 @@ pub struct PromptRule {
     pub model: String,
 }
 
-/// A fully-resolved custom auto model from any source.
+/// A local (YAML-authored) custom auto model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomAutoModel {
     /// User-facing name shown in the picker.
     pub name: String,
-    /// Where the definition came from.
-    pub source: CustomAutoModelSource,
     /// The routing strategy + targets.
     pub routing: CustomAutoRouting,
 }
@@ -97,74 +87,19 @@ pub struct CustomAutoModel {
 impl CustomAutoModel {
     /// Builds a local (YAML-sourced) custom auto model.
     pub fn new_local(name: String, routing: CustomAutoRouting) -> Self {
-        Self {
-            name,
-            source: CustomAutoModelSource::Local,
-            routing,
-        }
-    }
-
-    /// Builds a cloud (GSO-sourced) custom auto model.
-    pub fn new_cloud(
-        name: String,
-        routing: CustomAutoRouting,
-        uid: String,
-        owner_label: Option<String>,
-    ) -> Self {
-        Self {
-            name,
-            source: CustomAutoModelSource::Cloud { uid, owner_label },
-            routing,
-        }
-    }
-
-    /// Deserializes a cloud GSO `serialized_model` into a cloud-sourced model and
-    /// validates it. The JSON shape (`JsonCustomAutoModel`) is the contract
-    /// confirmed with the server: `{ "name", "routing": { "complexity" | "prompt" } }`.
-    ///
-    /// TODO(custom-auto): the cloud GSO *loader* (sync queue + persistence +
-    /// GraphQL + a `JsonObjectType` variant) lands in a follow-up alongside the
-    /// server's GraphQL support; this entry point implements the JSON contract so
-    /// that loader can plug straight in.
-    #[allow(dead_code)]
-    pub fn from_cloud_json(
-        serialized: &str,
-        uid: String,
-        owner_label: Option<String>,
-    ) -> Result<Self, String> {
-        let parsed: JsonCustomAutoModel =
-            serde_json::from_str(serialized).map_err(|e| format!("invalid cloud JSON: {e}"))?;
-        let model = Self::new_cloud(parsed.name, parsed.routing, uid, owner_label);
-        model.validate()?;
-        Ok(model)
+        Self { name, routing }
     }
 
     /// The `config_key` that identifies this model in the picker (`LLMId`) and in
-    /// the request registry (`ModelConfig.base`).
-    ///
-    /// Local autos are keyed by name (names are the unit of local-wins precedence,
-    /// inv. 19); cloud autos are keyed by their stable GSO uid so renames don't
-    /// break a persisted selection.
+    /// the request registry (`ModelConfig.base`). Local autos are keyed by name
+    /// (the unit of local-wins precedence, inv. 19).
     pub fn config_key(&self) -> String {
-        match &self.source {
-            CustomAutoModelSource::Local => format!("{CUSTOM_AUTO_PREFIX}local:{}", self.name),
-            CustomAutoModelSource::Cloud { uid, .. } => format!("{CUSTOM_AUTO_PREFIX}cloud:{uid}"),
-        }
+        format!("{LOCAL_CUSTOM_AUTO_PREFIX}{}", self.name)
     }
 
     /// The picker [`LLMId`] for this model (equal to its `config_key`).
     pub fn llm_id(&self) -> LLMId {
         LLMId::from(self.config_key())
-    }
-
-    /// A short source label for picker disambiguation (inv. 16).
-    pub fn source_label(&self) -> String {
-        match &self.source {
-            CustomAutoModelSource::Local => "Local".to_owned(),
-            CustomAutoModelSource::Cloud { owner_label, .. } => {
-                owner_label.clone().unwrap_or_else(|| "Cloud".to_owned())
-            }
-        }
     }
 
     /// Builds the synthetic [`LLMInfo`] picker entry for this custom auto model.
@@ -182,7 +117,7 @@ impl CustomAutoModel {
                 request_multiplier: 1,
                 credit_multiplier: None,
             },
-            description: Some(format!("Custom auto · {}", self.source_label())),
+            description: Some("Custom auto · Local".to_owned()),
             disable_reason: None,
             vision_supported: true,
             spec: None,
@@ -194,22 +129,16 @@ impl CustomAutoModel {
     }
 
     /// Builds the proto registry entry sent in `Request.Settings.custom_auto_models`.
-    ///
-    /// Local sources send the full definition inline every request; cloud sources
-    /// send only the GSO uid for the server to fetch + authorize.
+    /// Local autos send the full definition inline every request. (Cloud autos are
+    /// handled separately in `llms::LLMPreferences::custom_auto_models_for_request`,
+    /// which sends just the `cloud_uid`.)
     pub fn to_proto(&self) -> proto::CustomAutoModel {
-        let source = match &self.source {
-            CustomAutoModelSource::Local => Some(proto::custom_auto_model::Source::Inline(
-                self.to_proto_definition(),
-            )),
-            CustomAutoModelSource::Cloud { uid, .. } => {
-                Some(proto::custom_auto_model::Source::CloudUid(uid.clone()))
-            }
-        };
         proto::CustomAutoModel {
             config_key: self.config_key(),
             name: self.name.clone(),
-            source,
+            source: Some(proto::custom_auto_model::Source::Inline(
+                self.to_proto_definition(),
+            )),
         }
     }
 
@@ -311,7 +240,16 @@ pub fn is_custom_auto_id(id: &str) -> bool {
 /// Returns whether an id is the `config_key` of a *local* custom auto model.
 /// Used to reconcile stale local selections without touching cloud selections.
 pub fn is_local_custom_auto_id(id: &str) -> bool {
-    id.starts_with(concat!("custom-auto:", "local:"))
+    id.starts_with(LOCAL_CUSTOM_AUTO_PREFIX)
+}
+
+/// Extracts the GSO uid from a *cloud* custom-auto `config_key`
+/// (`custom-auto:cloud:<uid>`), returning `None` if `id` is not a cloud auto.
+///
+/// Cloud autos arrive via the available-LLMs fetch; at request time we reverse
+/// the id into a `cloud_uid` so the server can fetch + authorize the GSO.
+pub fn cloud_uid_from_id(id: &str) -> Option<&str> {
+    id.strip_prefix(CLOUD_CUSTOM_AUTO_PREFIX)
 }
 
 /// Describes a `model_configs/` YAML file that failed to parse or validate.
@@ -326,15 +264,6 @@ pub struct ModelConfigError {
     pub file_path: PathBuf,
     /// The full error from parsing/validation.
     pub error_message: String,
-}
-
-/// The cloud GSO `serialized_model` shape. Mirrors the portable definition and
-/// matches the server's serialization (internally-tagged `routing`, snake_case).
-/// Used by [`CustomAutoModel::from_cloud_json`].
-#[derive(Debug, Deserialize)]
-struct JsonCustomAutoModel {
-    name: String,
-    routing: CustomAutoRouting,
 }
 
 // ── Local YAML authoring shape (PRODUCT §8) ──────────────────────────────────
