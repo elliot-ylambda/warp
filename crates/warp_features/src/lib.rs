@@ -880,6 +880,13 @@ pub enum FeatureFlag {
     /// Gates Gemini Enterprise (GEAP) BYOLLM, which lets users
     /// route eliglible models to GEAP instead of Warp-managed inference.
     GeminiEnterprise,
+
+    /// Gates Custom Auto Models: user-defined "auto" models (named routers)
+    /// sourced from a local YAML config and cloud GSO configs. When enabled, the
+    /// local `model_configs/` loader runs, custom autos appear in the model
+    /// picker, and their definitions are sent inline (local) or by cloud uid
+    /// (cloud) in agent requests.
+    CustomAutoModels,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -947,6 +954,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::GPTConfigurableContextWindow,
     FeatureFlag::RestorePromptOnInlineModelSelectorSearch,
     FeatureFlag::WarpControlCli,
+    FeatureFlag::CustomAutoModels,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).

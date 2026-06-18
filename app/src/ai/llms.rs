@@ -8,14 +8,17 @@ use serde::{de, Deserialize, Serialize};
 use warp_core::features::FeatureFlag;
 use warp_core::ui::icons::Icon;
 use warp_core::user_preferences::GetUserPreferences;
+use warp_multi_agent_api as api;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
 
+use super::custom_auto_models::{self, CustomAutoModel, CustomAutoModelSource};
 use super::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::auth::auth_manager::{AuthManager, AuthManagerEvent};
 use crate::auth::AuthStateProvider;
 use crate::network::{NetworkStatus, NetworkStatusEvent, NetworkStatusKind};
 use crate::report_error;
 use crate::server::server_api::ServerApiProvider;
+use crate::user_config::{WarpConfig, WarpConfigUpdateEvent};
 use crate::workspaces::user_workspaces::{UserWorkspaces, UserWorkspacesEvent};
 
 /// Checks if a user's' API key is being used for the given provider.
@@ -568,6 +571,13 @@ pub struct LLMPreferences {
     /// Rebuilt from scratch on every `ApiKeyManagerEvent::KeysUpdated`, so adds, edits, and
     /// removals all immediately propagate to the picker.
     custom_llms: Vec<LLMInfo>,
+    /// Resolved custom auto models (local + cloud) merged with local-wins
+    /// precedence (inv. 19). Looked up by `config_key` to resolve a selection and
+    /// to build the per-request `Settings.custom_auto_models` registry.
+    custom_auto_models: Vec<CustomAutoModel>,
+    /// Synthetic `LLMInfo` picker entries for `custom_auto_models`, mirroring
+    /// `custom_llms`.
+    custom_auto_llms: Vec<LLMInfo>,
 }
 
 impl LLMPreferences {
@@ -613,15 +623,34 @@ impl LLMPreferences {
             },
         );
 
+        // Rebuild custom auto models whenever the local `model_configs/` directory
+        // changes, and reconcile any now-stale local selection (inv. 31).
+        if FeatureFlag::CustomAutoModels.is_enabled() {
+            ctx.subscribe_to_model(&WarpConfig::handle(ctx), |me, event, ctx| {
+                if matches!(event, WarpConfigUpdateEvent::ModelConfigs) {
+                    me.rebuild_custom_auto_models(ctx);
+                    me.reconcile_stale_custom_auto_selection(ctx);
+                }
+            });
+        }
+
         let base_llm_for_terminal_view = HashMap::new();
         let custom_llms = build_custom_llm_infos(ApiKeyManager::as_ref(ctx).keys());
 
-        let me = Self {
+        let mut me = Self {
             models_by_feature,
             last_update: None,
             base_llm_for_terminal_view,
             custom_llms,
+            custom_auto_models: Vec::new(),
+            custom_auto_llms: Vec::new(),
         };
+
+        // Seed from any already-loaded local config (the async load emits
+        // `ModelConfigs` shortly after startup to populate fully).
+        if FeatureFlag::CustomAutoModels.is_enabled() {
+            me.rebuild_custom_auto_models(ctx);
+        }
 
         // In agent mode eval builds, eagerly kick off a fetch of the model list from the server
         // so that it's available by the time test steps like `set_preferred_agent_mode_llm` run.
@@ -656,6 +685,7 @@ impl LLMPreferences {
                     .agent_mode
                     .info_for_id(llm_id)
                     .or_else(|| self.custom_llm_info_for_id_if_enabled(llm_id, app))
+                    .or_else(|| self.custom_auto_llm_info_for_id_if_enabled(llm_id))
                 {
                     return llm_info;
                 }
@@ -673,6 +703,7 @@ impl LLMPreferences {
                     .agent_mode
                     .info_for_id(&id)
                     .or_else(|| self.custom_llm_info_for_id_if_enabled(&id, app))
+                    .or_else(|| self.custom_auto_llm_info_for_id_if_enabled(&id))
             })
             .unwrap_or_else(|| self.models_by_feature.agent_mode.default_llm_info())
     }
@@ -702,6 +733,7 @@ impl LLMPreferences {
                     .coding
                     .info_for_id(&id)
                     .or_else(|| self.custom_llm_info_for_id_if_enabled(&id, app))
+                    .or_else(|| self.custom_auto_llm_info_for_id_if_enabled(&id))
             })
             .unwrap_or_else(|| self.models_by_feature.coding.default_llm_info())
     }
@@ -718,6 +750,7 @@ impl LLMPreferences {
             .iter()
             .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
             .chain(self.custom_llm_choices(app))
+            .chain(self.custom_auto_choices())
     }
 
     /// Returns the set of LLMs available for coding.
@@ -729,6 +762,7 @@ impl LLMPreferences {
             .iter()
             .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
             .chain(self.custom_llm_choices(app))
+            .chain(self.custom_auto_choices())
     }
 
     /// Returns the set of LLMs available for CLI agent.
@@ -817,6 +851,7 @@ impl LLMPreferences {
         self.models_by_feature
             .info_for_id(id)
             .or_else(|| self.custom_llm_info_for_id(id))
+            .or_else(|| self.custom_auto_llm_info_for_id(id))
     }
 
     /// Resolves an `LLMId` against the user's custom-endpoint LLMs.
@@ -855,6 +890,136 @@ impl LLMPreferences {
     fn custom_inference_enabled(app: &AppContext) -> bool {
         FeatureFlag::CustomInferenceEndpoints.is_enabled()
             && UserWorkspaces::as_ref(app).is_custom_inference_enabled(app)
+    }
+
+    // ── Custom auto models ──────────────────────────────────────────────
+
+    /// Resolves a custom auto model by its `config_key`/`LLMId`.
+    pub fn custom_auto_model_for_id(&self, id: &LLMId) -> Option<&CustomAutoModel> {
+        self.custom_auto_models.iter().find(|m| m.llm_id() == *id)
+    }
+
+    fn custom_auto_llm_info_for_id(&self, id: &LLMId) -> Option<&LLMInfo> {
+        self.custom_auto_llms.iter().find(|info| info.id == *id)
+    }
+
+    fn custom_auto_llm_info_for_id_if_enabled(&self, id: &LLMId) -> Option<&LLMInfo> {
+        FeatureFlag::CustomAutoModels
+            .is_enabled()
+            .then(|| self.custom_auto_llm_info_for_id(id))
+            .flatten()
+    }
+
+    /// Iterator over the custom auto picker entries, gated on the feature flag.
+    /// Mirrors [`Self::custom_llm_choices`].
+    pub fn custom_auto_choices(&self) -> std::slice::Iter<'_, LLMInfo> {
+        if FeatureFlag::CustomAutoModels.is_enabled() {
+            self.custom_auto_llms.iter()
+        } else {
+            (&[] as &[LLMInfo]).iter()
+        }
+    }
+
+    /// Builds the `Settings.custom_auto_models` registry for an outbound request,
+    /// including only the selected base/coding custom autos (referenced by their
+    /// `config_key` in `ModelConfig`). Local sources send the definition inline;
+    /// cloud sources send only the GSO uid (inv. via TECH §7).
+    pub fn custom_auto_models_for_request(
+        &self,
+        base_id: &LLMId,
+        coding_id: &LLMId,
+    ) -> Option<api::request::settings::CustomAutoModels> {
+        if !FeatureFlag::CustomAutoModels.is_enabled() {
+            return None;
+        }
+        let mut models = Vec::new();
+        let mut seen = HashSet::new();
+        for id in [base_id, coding_id] {
+            if let Some(model) = self.custom_auto_model_for_id(id) {
+                if seen.insert(model.config_key()) {
+                    models.push(model.to_proto());
+                }
+            }
+        }
+        (!models.is_empty()).then_some(api::request::settings::CustomAutoModels { models })
+    }
+
+    /// Rebuilds `custom_auto_models`/`custom_auto_llms` from the local
+    /// `model_configs/` directory and cloud objects, applying local-wins
+    /// precedence (inv. 19), then notifies subscribers.
+    fn rebuild_custom_auto_models(&mut self, ctx: &mut ModelContext<Self>) {
+        let local = WarpConfig::as_ref(ctx).custom_auto_models().clone();
+        let cloud = self.cloud_custom_auto_models();
+        self.custom_auto_models = merge_custom_autos(local, cloud);
+        self.custom_auto_llms = self
+            .custom_auto_models
+            .iter()
+            .map(CustomAutoModel::to_llm_info)
+            .collect();
+        ctx.emit(LLMPreferencesEvent::UpdatedAvailableLLMs);
+    }
+
+    /// Cloud-backed custom auto models (personal + team). Cloud GSO loading is
+    /// wired separately; returns an empty list until then.
+    fn cloud_custom_auto_models(&self) -> Vec<CustomAutoModel> {
+        Vec::new()
+    }
+
+    /// Resets any persisted *local* custom-auto selection that no longer resolves
+    /// to a loaded definition, so a deleted/invalid local config falls back to the
+    /// default model and the visible selection updates (inv. 31). Scoped to local
+    /// ids so a cloud selection isn't reset by a local reload.
+    fn reconcile_stale_custom_auto_selection(&mut self, ctx: &mut ModelContext<Self>) {
+        let valid_local: HashSet<LLMId> = self
+            .custom_auto_models
+            .iter()
+            .filter(|m| matches!(m.source, CustomAutoModelSource::Local))
+            .map(|m| m.llm_id())
+            .collect();
+
+        let mut updated_agent_mode = false;
+        let mut updated_coding = false;
+
+        self.base_llm_for_terminal_view.retain(|_, id| {
+            let stale = custom_auto_models::is_local_custom_auto_id(id.as_str())
+                && !valid_local.contains(&*id);
+            updated_agent_mode |= stale;
+            !stale
+        });
+
+        AIExecutionProfilesModel::handle(ctx).update(ctx, |profiles, ctx| {
+            for profile_id in profiles.get_all_profile_ids() {
+                let Some(profile) = profiles.get_profile_by_id(profile_id, ctx) else {
+                    continue;
+                };
+                let profile_data = profile.data();
+                let base_stale = profile_data.base_model.as_ref().is_some_and(|id| {
+                    custom_auto_models::is_local_custom_auto_id(id.as_str())
+                        && !valid_local.contains(id)
+                });
+                if base_stale {
+                    profiles.set_base_model(profile_id, None, ctx);
+                    profiles.set_context_window_limit(profile_id, None, ctx);
+                    updated_agent_mode = true;
+                }
+                let coding_stale = profile_data.coding_model.as_ref().is_some_and(|id| {
+                    custom_auto_models::is_local_custom_auto_id(id.as_str())
+                        && !valid_local.contains(id)
+                });
+                if coding_stale {
+                    profiles.set_coding_model(profile_id, None, ctx);
+                    updated_coding = true;
+                }
+            }
+        });
+
+        if updated_agent_mode {
+            self.trigger_snapshot_save(ctx);
+            ctx.emit(LLMPreferencesEvent::UpdatedActiveAgentModeLLM);
+        }
+        if updated_coding {
+            ctx.emit(LLMPreferencesEvent::UpdatedActiveCodingLLM);
+        }
     }
 
     /// Reads the user's current `ApiKeyManager.custom_endpoints` and replaces `custom_llms`
@@ -1355,6 +1520,27 @@ fn custom_llm_info_from(endpoint: &CustomEndpoint, model: &CustomEndpointModel) 
         discount_percentage: None,
         context_window: LLMContextWindow::default(),
     }
+}
+
+/// Merges local and cloud custom auto models into a single picker list.
+///
+/// Local entries are listed first so local takes precedence (inv. 19); both
+/// sources still contribute distinct entries (distinct `config_key`s) so name
+/// collisions remain individually selectable. De-duplicates by `config_key`,
+/// keeping the first occurrence (so an intra-source name collision does not
+/// silently overwrite an earlier entry, inv. 20).
+fn merge_custom_autos(
+    local: Vec<CustomAutoModel>,
+    cloud: Vec<CustomAutoModel>,
+) -> Vec<CustomAutoModel> {
+    let mut merged = Vec::with_capacity(local.len() + cloud.len());
+    let mut seen = HashSet::new();
+    for model in local.into_iter().chain(cloud) {
+        if seen.insert(model.config_key()) {
+            merged.push(model);
+        }
+    }
+    merged
 }
 
 /// Gets the last cached LLM metadata.
