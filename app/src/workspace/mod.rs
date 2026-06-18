@@ -956,8 +956,10 @@ pub fn init(app: &mut AppContext) {
         .with_enabled(|| FeatureFlag::GroupedTabs.is_enabled())
         .with_group(bindings::BindingGroup::Navigation.as_str())
         .with_context_predicate(id!("Workspace") & !id!("Workspace_PaneDragging")),
-        // Gated on the active tab being grouped: the remove from group option is only
-        // available when all selected tabs (including the active tab) are in a group.
+        // Gated on `Workspace_ActiveOrSelectedTabsInGroup`: offered only when
+        // there's an unambiguous group to leave — a single-group multi-selection,
+        // or (with no selection) a grouped active tab. Mixed selections aren't
+        // offered, matching the multi-tab right-click menu.
         EditableBinding::new(
             "workspace:remove_active_or_selected_tabs_from_group",
             "Remove active or selected tab(s) from group",
@@ -966,7 +968,9 @@ pub fn init(app: &mut AppContext) {
         .with_enabled(|| FeatureFlag::GroupedTabs.is_enabled())
         .with_group(bindings::BindingGroup::Navigation.as_str())
         .with_context_predicate(
-            id!("Workspace") & id!("Workspace_ActiveTabInGroup") & !id!("Workspace_PaneDragging"),
+            id!("Workspace")
+                & id!("Workspace_ActiveOrSelectedTabsInGroup")
+                & !id!("Workspace_PaneDragging"),
         ),
     ]);
 

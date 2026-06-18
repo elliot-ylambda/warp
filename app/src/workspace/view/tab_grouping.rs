@@ -105,7 +105,7 @@ impl Workspace {
     /// The active tab index is always included if any other tab is marked
     /// as selected. This is to handle the edge case where we only mark other
     /// tabs as selected via command click.
-    fn selected_tab_indices(&self) -> Vec<usize> {
+    pub(super) fn selected_tab_indices(&self) -> Vec<usize> {
         let any_flagged = self.tabs.iter().any(|tab| tab.in_multi_selection);
         // If no tab is part of the multi selection, return empty list.
         if !any_flagged {
@@ -133,7 +133,7 @@ impl Workspace {
 
     /// Gates the "Remove from group" menu item. All selected tabs
     /// must be in the same group in order to display this option.
-    fn selection_shared_group(&self) -> Option<TabGroupId> {
+    pub(super) fn selection_shared_group(&self) -> Option<TabGroupId> {
         let indices = self.selected_tab_indices();
         let mut group_ids = indices
             .iter()
@@ -179,10 +179,9 @@ impl Workspace {
     }
 
     /// Context-aware "remove from group" entry point used by the
-    /// `workspace:remove_active_or_selected_tabs_from_group` keybinding. When
-    /// the multi-selection covers 2+ tabs, removes the selection from its
-    /// shared group; otherwise removes just the active tab. Mirrors
-    /// `new_tab_group_from_active_or_selected_tabs` on the create side.
+    /// `workspace:remove_active_or_selected_tabs_from_group` keybinding. With a
+    /// 2+ multi-selection, removes the whole selection from its group;
+    /// otherwise removes just the active tab.
     pub(super) fn remove_active_or_selected_tabs_from_group(
         &mut self,
         ctx: &mut ViewContext<Self>,

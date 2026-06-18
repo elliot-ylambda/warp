@@ -25308,6 +25308,22 @@ impl View for Workspace {
             }
         }
 
+        // "Remove from group" is valid when there's an unambiguous target: a
+        // 2+ multi-selection that shares one group, or—failing that—an active
+        // tab that's in a group. Mirrors the multi-tab right-click menu, which
+        // only offers "Remove from group" for a single-group selection.
+        let selected = self.selected_tab_indices();
+        let removable_from_group = if selected.len() >= 2 {
+            self.selection_shared_group().is_some()
+        } else {
+            self.tabs
+                .get(self.active_tab_index)
+                .is_some_and(|tab| tab.group_id.is_some())
+        };
+        if removable_from_group {
+            context.set.insert("Workspace_ActiveOrSelectedTabsInGroup");
+        }
+
         if WarpDriveSettings::is_warp_drive_enabled(app) {
             context.set.insert(flags::ENABLE_WARP_DRIVE);
         }
