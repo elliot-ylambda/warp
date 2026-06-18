@@ -158,6 +158,39 @@ impl Workspace {
         }
     }
 
+    /// Context-aware "create group" entry point used by the
+    /// `workspace:new_tab_group_from_selection` keybinding. When the
+    /// multi-selection covers 2+ tabs, groups the selection; otherwise groups
+    /// just the active tab. `selected_tab_indices` already folds the active
+    /// tab into the selection, so a lone flagged active tab (or no selection
+    /// at all) takes the single-tab path.
+    pub(super) fn new_tab_group_from_selection(&mut self, ctx: &mut ViewContext<Self>) {
+        if !FeatureFlag::GroupedTabs.is_enabled() {
+            return;
+        }
+        if self.selected_tab_indices().len() >= 2 {
+            self.new_tab_group_from_selected_tabs(ctx);
+        } else {
+            self.new_tab_group_from_tab(self.active_tab_index, ctx);
+        }
+    }
+
+    /// Context-aware "remove from group" entry point used by the
+    /// `workspace:remove_selection_from_group` keybinding. When the
+    /// multi-selection covers 2+ tabs, removes the selection from its shared
+    /// group; otherwise removes just the active tab. Mirrors
+    /// `new_tab_group_from_selection` on the create side.
+    pub(super) fn remove_selection_from_group(&mut self, ctx: &mut ViewContext<Self>) {
+        if !FeatureFlag::GroupedTabs.is_enabled() {
+            return;
+        }
+        if self.selected_tab_indices().len() >= 2 {
+            self.remove_selected_tabs_from_group(ctx);
+        } else {
+            self.remove_tab_from_group(self.active_tab_index, ctx);
+        }
+    }
+
     /// "Create group from tabs" menu action. Group membership requires
     /// tabs to be contiguous in the bar, so we gather the selected tabs into
     /// a single block anchored at the earliest selected tab's position before
