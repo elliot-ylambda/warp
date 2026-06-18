@@ -37,7 +37,11 @@ const MODEL_ROW_SPACING: f32 = 16.;
 const REMOVE_MODEL_BUTTON_SPACING: f32 = 8.;
 const REMOVE_MODEL_BUTTON_COL_WIDTH: f32 = 20.;
 const MODAL_SCROLLBAR_WIDTH: f32 = 4.;
-const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 24.;
+// Right margin shared by the scrollable content and the (non-scrollable) actions
+// row. It includes the overlayed scrollbar width so the scrollable content's right
+// edge (e.g. the remove-model "X" buttons) lines up with the Save/Cancel buttons,
+// which have no scrollbar.
+const SCROLL_CONTENT_RIGHT_MARGIN: f32 = 24. + MODAL_SCROLLBAR_WIDTH;
 const MODEL_INPUT_WIDTH: f32 = (INPUT_WIDTH - MODEL_ROW_SPACING) / 2.;
 fn model_row_scroll_position_id(index: usize) -> String {
     format!("custom_endpoint_model_row_{index}")
