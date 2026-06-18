@@ -1522,7 +1522,7 @@ impl View for RequestedCommandView {
                                     !exchange
                                         .input
                                         .iter()
-                                        .any(|input| input.display_query().is_some())
+                                        .any(|input| input.user_input_text().is_some())
                                 })
                     }))
                 && !is_input_pinned_to_top);

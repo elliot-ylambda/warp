@@ -2772,7 +2772,11 @@ impl Display for AIAgentInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UserQuery { .. } => {
-                write!(f, "UserQuery: {}", self.display_query().unwrap_or_default())
+                write!(
+                    f,
+                    "UserQuery: {}",
+                    self.user_input_text().unwrap_or_default()
+                )
             }
             Self::AutoCodeDiffQuery { query, .. } => {
                 write!(f, "AutoCodeDiffQuery: {query}")
@@ -2819,7 +2823,7 @@ impl AIAgentInput {
     /// (typed queries, slash commands, skill invocations, etc.). Unlike
     /// [`Self::is_user_query`], which strictly matches the `UserQuery` variant,
     /// this returns `Some` for several input variants.
-    pub fn display_query(&self) -> Option<String> {
+    pub fn user_input_text(&self) -> Option<String> {
         match self {
             Self::UserQuery {
                 query,
@@ -2883,7 +2887,7 @@ impl AIAgentInput {
         &self,
         initial_conversation_query: Option<&String>,
     ) -> Option<String> {
-        let mut query = self.display_query()?;
+        let mut query = self.user_input_text()?;
         if self
             .user_query_mode()
             .is_none_or(|mode| matches!(mode, UserQueryMode::Normal))
@@ -3112,7 +3116,7 @@ impl AIAgentExchange {
         let user_queries: Vec<String> = self
             .input
             .iter()
-            .filter_map(|input| input.display_query())
+            .filter_map(|input| input.user_input_text())
             .collect();
         user_queries.join("\n")
     }
@@ -3164,7 +3168,7 @@ impl AIAgentExchange {
     pub fn has_user_query(&self) -> bool {
         self.input
             .iter()
-            .any(|input| input.display_query().is_some())
+            .any(|input| input.user_input_text().is_some())
     }
 
     pub fn has_accepted_file_edit(&self) -> bool {

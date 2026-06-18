@@ -305,7 +305,7 @@ impl AIRequestUsageModel {
                         if exchange
                             .input
                             .iter()
-                            .any(|input| input.display_query().is_some())
+                            .any(|input| input.user_input_text().is_some())
                         {
                             break;
                         }
