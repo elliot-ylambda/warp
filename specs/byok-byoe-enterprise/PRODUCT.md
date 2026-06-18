@@ -77,5 +77,5 @@ Team-managed configuration is split into public metadata and secrets.
 
 ## Open Questions
 
-- Should admins be able to prevent team members from adding their own API key and Custom Endpoints separately? (i.e. it's okay for users to add their own API key, but it's not okay for them to add their own Custom Endpoint). Do we want separate toggles, or should we just treat these the same? **My vote**: Unless enterprise demand for this is strong, I think both being under the same toggle makes more sense / aligns more with what we already have in the backend for the immediate sprint.
+- Should admins be able to prevent team members from adding their own API key and Custom Endpoints separately? (i.e. it's okay for users to add their own API key, but it's not okay for them to add their own Custom Endpoint). Do we want separate toggles, or should we just treat these the same? **My vote**: Unless enterprise demand for this is strong, I think this is fine to be under the same toggle.
 - Should we default to "Allow users to bring their own models" for a newly enabled team? **My vote**: No, we should not. 
