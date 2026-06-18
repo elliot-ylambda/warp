@@ -211,7 +211,7 @@ pub enum WorkspaceAction {
     /// Context-aware "create group" entry point for the keybinding: groups
     /// the multi-selection when 2+ tabs are selected, otherwise groups the
     /// active tab.
-    NewTabGroupFromSelection,
+    NewTabGroupFromActiveOrSelectedTabs,
     /// Moves every selected tab into `group_id`.
     MoveSelectedTabsToGroup {
         group_id: TabGroupId,
@@ -221,7 +221,7 @@ pub enum WorkspaceAction {
     /// Context-aware "remove from group" entry point for the keybinding:
     /// removes the multi-selection from its shared group when 2+ tabs are
     /// selected, otherwise removes the active tab.
-    RemoveSelectionFromGroup,
+    RemoveActiveOrSelectedTabsFromGroup,
     ToggleTabGroupRightClickMenu {
         group_id: TabGroupId,
         anchor: TabContextMenuAnchor,
@@ -904,10 +904,10 @@ impl WorkspaceAction {
             | MoveTabToGroup { .. }
             | RemoveTabFromGroup(_)
             | NewTabGroupFromSelectedTabs
-            | NewTabGroupFromSelection
+            | NewTabGroupFromActiveOrSelectedTabs
             | MoveSelectedTabsToGroup { .. }
             | RemoveSelectedTabsFromGroup
-            | RemoveSelectionFromGroup
+            | RemoveActiveOrSelectedTabsFromGroup
             | UngroupTabs(_)
             | NewTabInGroup(_)
             | MoveTabGroupUp(_)

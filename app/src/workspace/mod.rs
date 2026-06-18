@@ -949,9 +949,9 @@ pub fn init(app: &mut AppContext) {
         .with_group(bindings::BindingGroup::Navigation.as_str())
         .with_context_predicate(id!("Workspace") & !id!("Workspace_PaneDragging")),
         EditableBinding::new(
-            "workspace:new_tab_group_from_selection",
+            "workspace:new_tab_group_from_active_or_selected_tabs",
             "Create tab group from active or selected tab(s)",
-            WorkspaceAction::NewTabGroupFromSelection,
+            WorkspaceAction::NewTabGroupFromActiveOrSelectedTabs,
         )
         .with_enabled(|| FeatureFlag::GroupedTabs.is_enabled())
         .with_group(bindings::BindingGroup::Navigation.as_str())
@@ -959,9 +959,9 @@ pub fn init(app: &mut AppContext) {
         // Gated on the active tab being grouped: the remove from group option is only
         // available when all selected tabs (including the active tab) are in a group.
         EditableBinding::new(
-            "workspace:remove_selection_from_group",
+            "workspace:remove_active_or_selected_tabs_from_group",
             "Remove active or selected tab(s) from group",
-            WorkspaceAction::RemoveSelectionFromGroup,
+            WorkspaceAction::RemoveActiveOrSelectedTabsFromGroup,
         )
         .with_enabled(|| FeatureFlag::GroupedTabs.is_enabled())
         .with_group(bindings::BindingGroup::Navigation.as_str())

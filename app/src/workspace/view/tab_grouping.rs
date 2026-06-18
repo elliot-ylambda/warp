@@ -159,12 +159,15 @@ impl Workspace {
     }
 
     /// Context-aware "create group" entry point used by the
-    /// `workspace:new_tab_group_from_selection` keybinding. When the
-    /// multi-selection covers 2+ tabs, groups the selection; otherwise groups
-    /// just the active tab. `selected_tab_indices` already folds the active
-    /// tab into the selection, so a lone flagged active tab (or no selection
-    /// at all) takes the single-tab path.
-    pub(super) fn new_tab_group_from_selection(&mut self, ctx: &mut ViewContext<Self>) {
+    /// `workspace:new_tab_group_from_active_or_selected_tabs` keybinding. When
+    /// the multi-selection covers 2+ tabs, groups the selection; otherwise
+    /// groups just the active tab. `selected_tab_indices` already folds the
+    /// active tab into the selection, so a lone flagged active tab (or no
+    /// selection at all) takes the single-tab path.
+    pub(super) fn new_tab_group_from_active_or_selected_tabs(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if !FeatureFlag::GroupedTabs.is_enabled() {
             return;
         }
@@ -176,11 +179,14 @@ impl Workspace {
     }
 
     /// Context-aware "remove from group" entry point used by the
-    /// `workspace:remove_selection_from_group` keybinding. When the
-    /// multi-selection covers 2+ tabs, removes the selection from its shared
-    /// group; otherwise removes just the active tab. Mirrors
-    /// `new_tab_group_from_selection` on the create side.
-    pub(super) fn remove_selection_from_group(&mut self, ctx: &mut ViewContext<Self>) {
+    /// `workspace:remove_active_or_selected_tabs_from_group` keybinding. When
+    /// the multi-selection covers 2+ tabs, removes the selection from its
+    /// shared group; otherwise removes just the active tab. Mirrors
+    /// `new_tab_group_from_active_or_selected_tabs` on the create side.
+    pub(super) fn remove_active_or_selected_tabs_from_group(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if !FeatureFlag::GroupedTabs.is_enabled() {
             return;
         }
