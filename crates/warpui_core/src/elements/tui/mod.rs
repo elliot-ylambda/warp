@@ -96,6 +96,24 @@ pub trait TuiElement {
     }
 }
 
+/// The boxed, type-erased element a [`TuiView`](crate::TuiView) renders to.
+pub type TuiRenderOutput = Box<dyn TuiElement>;
+
+/// The unit type is the inert element: it occupies no space, paints nothing,
+/// and ignores events. It is a convenient placeholder render output for a view
+/// that draws nothing itself (for example a bare window root).
+impl TuiElement for () {
+    fn layout(&mut self, _constraint: TuiConstraint) -> TuiSize {
+        TuiSize::ZERO
+    }
+
+    fn render(&self, _area: TuiRect, _buffer: &mut TuiBuffer) {}
+
+    fn desired_height(&self, _width: u16) -> u16 {
+        0
+    }
+}
+
 /// Threads the current view ancestry through the element tree during the
 /// presenter's child-view recursion, recording each child view's parent so the
 /// shared core can attribute events and actions to the right view.
@@ -138,3 +156,7 @@ impl<'a> TuiPresentationContext<'a> {
             .expect("a child view is entered before it is exited");
     }
 }
+
+#[cfg(test)]
+#[path = "mod_test.rs"]
+mod tests;
