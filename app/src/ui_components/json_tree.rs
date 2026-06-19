@@ -70,8 +70,8 @@ pub enum PathSegment {
 /// as long as the surrounding JSON structure is unchanged.
 #[derive(Debug, Default, Clone)]
 pub struct JsonTreeState {
-    /// Expansion state for object/array nodes. Absent = default (expanded at
-    /// depth 0, collapsed deeper).
+    /// Expansion state for object/array nodes. Absent = expanded (all nodes
+    /// open by default). An explicit entry set by toggling takes precedence.
     node_expansion: HashMap<Vec<PathSegment>, bool>,
     /// Expansion state for long string values. Absent = collapsed (elided).
     string_expansion: HashMap<Vec<PathSegment>, bool>,
@@ -85,18 +85,19 @@ pub struct JsonTreeState {
     /// here (keyed by node path) gives each row a stable handle that persists
     /// across re-renders triggered by `ctx.notify()`.
     mouse_states: RefCell<HashMap<Vec<PathSegment>, MouseStateHandle>>,
+    /// Per-string `MouseStateHandle`s for long-string expand/collapse rows.
+    /// Separate from `mouse_states` to avoid collisions with container handles
+    /// at the same path.
+    string_mouse_states: RefCell<HashMap<Vec<PathSegment>, MouseStateHandle>>,
 }
 
 impl JsonTreeState {
-    /// Returns whether the node at `path` and `depth` should be expanded.
+    /// Returns whether the node at `path` should be expanded.
     ///
-    /// Default behaviour: expanded at depth 0, collapsed at depth 1+. An
-    /// explicit entry in the state map always takes precedence.
-    pub fn is_expanded(&self, path: &[PathSegment], depth: usize) -> bool {
-        if let Some(&explicit) = self.node_expansion.get(path) {
-            return explicit;
-        }
-        depth == 0
+    /// All nodes are expanded by default. An explicit toggle entry takes
+    /// precedence. The `depth` parameter is kept for API compatibility.
+    pub fn is_expanded(&self, path: &[PathSegment], _depth: usize) -> bool {
+        self.node_expansion.get(path).copied().unwrap_or(true)
     }
 
     /// Returns whether the long string at `path` should be expanded.
@@ -115,11 +116,18 @@ impl JsonTreeState {
             .clone()
     }
 
+    /// Returns the stable `MouseStateHandle` for the long-string expander at
+    /// `path`. Stored separately from container handles so each path can have
+    /// both a container handle and a string handle without collision.
+    pub fn mouse_state_for_string(&self, path: &[PathSegment]) -> MouseStateHandle {
+        self.string_mouse_states
+            .borrow_mut()
+            .entry(path.to_vec())
+            .or_insert_with(|| Arc::new(Mutex::new(MouseState::default())))
+            .clone()
+    }
+
     /// Toggles the expansion state of the node at `path`.
-    ///
-    /// If no explicit state exists, the new state is the inverse of the
-    /// default (derived from depth). Callers must pass `depth` so we know
-    /// what the default would have been.
     pub fn toggle(&mut self, path: &[PathSegment], depth: usize) {
         let current = self.is_expanded(path, depth);
         self.node_expansion.insert(path.to_vec(), !current);
@@ -256,6 +264,7 @@ pub fn render_json_tree(
     colors: &JsonTreeColors,
     position_id_prefix: &str,
     on_toggle: Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync>,
+    on_toggle_string: Arc<dyn Fn(&mut EventContext, Vec<PathSegment>) + Send + Sync>,
     on_copy_json: Arc<
         dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value, String) + Send + Sync,
     >,
@@ -283,6 +292,7 @@ pub fn render_json_tree(
         colors,
         position_id_prefix,
         &on_toggle,
+        &on_toggle_string,
         &on_copy_json,
         font_family,
         &mut column,
@@ -306,6 +316,7 @@ fn render_value(
     colors: &JsonTreeColors,
     position_id_prefix: &str,
     on_toggle: &Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync>,
+    on_toggle_string: &Arc<dyn Fn(&mut EventContext, Vec<PathSegment>) + Send + Sync>,
     on_copy_json: &Arc<
         dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value, String) + Send + Sync,
     >,
@@ -346,6 +357,7 @@ fn render_value(
                         colors,
                         position_id_prefix,
                         on_toggle,
+                        on_toggle_string,
                         on_copy_json,
                         font_family,
                         column,
@@ -387,6 +399,7 @@ fn render_value(
                         colors,
                         position_id_prefix,
                         on_toggle,
+                        on_toggle_string,
                         on_copy_json,
                         font_family,
                         column,
@@ -396,19 +409,41 @@ fn render_value(
         }
 
         serde_json::Value::String(s) => {
-            render_scalar_row(
-                path,
-                depth,
-                label,
-                build_string_value_text(s, colors, font_family),
-                value.clone(),
-                state,
-                colors,
-                position_id_prefix,
-                on_copy_json,
-                font_family,
-                column,
-            );
+            if is_long_string(s) {
+                render_long_string_row(
+                    path,
+                    depth,
+                    label,
+                    s,
+                    value.clone(),
+                    state,
+                    colors,
+                    position_id_prefix,
+                    on_toggle_string,
+                    on_copy_json,
+                    font_family,
+                    column,
+                );
+            } else {
+                let display = format!("\"{}\"", s);
+                let text = Text::new_inline(display, font_family, TREE_FONT_SIZE)
+                    .with_color(colors.string)
+                    .soft_wrap(false)
+                    .finish();
+                render_scalar_row(
+                    path,
+                    depth,
+                    label,
+                    text,
+                    value.clone(),
+                    state,
+                    colors,
+                    position_id_prefix,
+                    on_copy_json,
+                    font_family,
+                    column,
+                );
+            }
         }
 
         serde_json::Value::Number(n) => {
@@ -474,29 +509,115 @@ fn render_value(
     }
 }
 
-/// Builds the value text for a string, applying long-string elision if needed.
-/// Elided strings show a truncated preview with an ellipsis.
-fn build_string_value_text(
+/// Renders an expandable/collapsible long string row.
+///
+/// Collapsed: shows first-line preview with ellipsis + right-pointing chevron.
+/// Expanded: shows the full string with word-wrap + down-pointing chevron.
+/// The chevron position mirrors container nodes so the column aligns consistently.
+#[allow(clippy::too_many_arguments)]
+fn render_long_string_row(
+    path: Vec<PathSegment>,
+    depth: usize,
+    label: Option<String>,
     s: &str,
+    value_for_copy: serde_json::Value,
+    state: &JsonTreeState,
     colors: &JsonTreeColors,
+    position_id_prefix: &str,
+    on_toggle_string: &Arc<dyn Fn(&mut EventContext, Vec<PathSegment>) + Send + Sync>,
+    on_copy_json: &Arc<
+        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value, String) + Send + Sync,
+    >,
     font_family: warpui::fonts::FamilyId,
-) -> Box<dyn Element> {
-    if is_long_string(s) {
-        // Show a preview: first line, capped at threshold characters.
+    column: &mut Flex,
+) {
+    let anchor_id = format!("{position_id_prefix}:row:{path:?}");
+    let is_expanded = state.is_string_expanded(&path);
+
+    let icon = if is_expanded {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+
+    let mut row = Flex::row()
+        .with_main_axis_size(MainAxisSize::Max)
+        .with_cross_axis_alignment(CrossAxisAlignment::Center);
+
+    // Indent spacer.
+    row.add_child(indent_spacer(depth));
+
+    // Chevron in the standard left position.
+    row.add_child(
+        ConstrainedBox::new(
+            icon.to_warpui_icon(warp_core::ui::theme::Fill::Solid(colors.annotation))
+                .finish(),
+        )
+        .with_width(CHEVRON_SIZE)
+        .with_height(CHEVRON_SIZE)
+        .finish(),
+    );
+
+    // Key/index label (if inside an object or array).
+    if let Some(ref key) = label {
+        let key_text = Text::new_inline(format!("{}:  ", key), font_family, TREE_FONT_SIZE)
+            .with_color(colors.key)
+            .soft_wrap(false)
+            .finish();
+        row.add_child(key_text);
+    }
+
+    // String value: preview when collapsed, full text when expanded.
+    let string_element: Box<dyn Element> = if is_expanded {
+        let display = format!("\"{}\"", s);
+        Shrinkable::new(
+            1.,
+            Text::new(display, font_family, TREE_FONT_SIZE)
+                .with_color(colors.string)
+                .with_selectable(true)
+                .finish(),
+        )
+        .finish()
+    } else {
         let first_line = s.lines().next().unwrap_or("");
         let preview: String = first_line.chars().take(LONG_STRING_THRESHOLD).collect();
-        let display = format!("\"{}…\"", preview);
-        Text::new_inline(display, font_family, TREE_FONT_SIZE)
-            .with_color(colors.string)
-            .soft_wrap(false)
-            .finish()
-    } else {
-        let display = format!("\"{}\"", s);
-        Text::new_inline(display, font_family, TREE_FONT_SIZE)
-            .with_color(colors.string)
-            .soft_wrap(false)
-            .finish()
-    }
+        let display = format!("\"{}\u{2026}\"", preview);
+        Shrinkable::new(
+            1.,
+            Text::new_inline(display, font_family, TREE_FONT_SIZE)
+                .with_color(colors.string)
+                .soft_wrap(false)
+                .finish(),
+        )
+        .finish()
+    };
+    row.add_child(string_element);
+
+    let row_element = row.finish();
+
+    let on_toggle_clone = on_toggle_string.clone();
+    let path_for_toggle = path.clone();
+    let on_copy_clone = on_copy_json.clone();
+    let path_for_copy = path.clone();
+    let anchor_for_copy = anchor_id.clone();
+    // Stable handle for the string expander — separate from container handles.
+    let state_handle = state.mouse_state_for_string(&path);
+
+    let hoverable = Hoverable::new(state_handle, move |_| row_element)
+        .on_click(move |ctx, _app, _pos| {
+            on_toggle_clone(ctx, path_for_toggle.clone());
+        })
+        .on_right_click(move |ctx, _app, _pos| {
+            on_copy_clone(
+                ctx,
+                path_for_copy.clone(),
+                value_for_copy.clone(),
+                anchor_for_copy.clone(),
+            );
+        })
+        .finish();
+
+    column.add_child(SavePosition::new(hoverable, &anchor_id).finish());
 }
 
 /// Renders a collapsible object/array node row with a chevron expander.

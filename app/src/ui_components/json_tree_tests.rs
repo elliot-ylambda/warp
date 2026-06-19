@@ -111,16 +111,16 @@ mod tests {
         let path = vec![PathSegment::Index(0)];
         let mut state = JsonTreeState::default();
 
-        // Depth-1 node defaults to collapsed.
-        assert!(!state.is_expanded(&path, 1));
-
-        // First toggle: collapsed → expanded.
-        state.toggle(&path, 1);
+        // All nodes default to expanded.
         assert!(state.is_expanded(&path, 1));
 
-        // Second toggle: expanded → collapsed again.
+        // First toggle: expanded → collapsed.
         state.toggle(&path, 1);
         assert!(!state.is_expanded(&path, 1));
+
+        // Second toggle: collapsed → expanded again.
+        state.toggle(&path, 1);
+        assert!(state.is_expanded(&path, 1));
     }
 
     #[test]
@@ -132,15 +132,15 @@ mod tests {
         ];
         let mut state = JsonTreeState::default();
 
-        // Both are at depth 1, so default is collapsed.
-        assert!(!state.is_expanded(&parent, 1));
-        assert!(!state.is_expanded(&child, 1));
+        // Both are at depth 1, and all nodes default to expanded.
+        assert!(state.is_expanded(&parent, 1));
+        assert!(state.is_expanded(&child, 1));
 
-        // Toggle parent only.
+        // Toggle parent only: collapses it; child is unaffected.
         state.toggle(&parent, 1);
 
-        assert!(state.is_expanded(&parent, 1));
-        assert!(!state.is_expanded(&child, 1));
+        assert!(!state.is_expanded(&parent, 1));
+        assert!(state.is_expanded(&child, 1));
     }
 
     // -----------------------------------------------------------------------
@@ -179,10 +179,9 @@ mod tests {
         // Toggling a string does not affect node expansion state for the same path.
         state.toggle_string(&path);
         assert!(state.is_string_expanded(&path));
-        // Node expansion at depth 0 is still the default (expanded).
+        // Node expansion is still the default (expanded) at all depths.
         assert!(state.is_expanded(&path, 0));
-        // Node expansion at depth 1 is still the default (collapsed).
-        assert!(!state.is_expanded(&path, 1));
+        assert!(state.is_expanded(&path, 1));
     }
 
     // -----------------------------------------------------------------------
@@ -190,27 +189,18 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn depth_0_defaults_to_expanded() {
+    fn all_depths_default_to_expanded() {
+        // All nodes are open by default — the tree is fully expanded on first render.
         let state = JsonTreeState::default();
-        let path = vec![];
-        assert!(state.is_expanded(&path, 0));
-    }
-
-    #[test]
-    fn depth_1_defaults_to_collapsed() {
-        let state = JsonTreeState::default();
-        let path = vec![PathSegment::Key("field".to_string())];
-        assert!(!state.is_expanded(&path, 1));
-    }
-
-    #[test]
-    fn depth_2_defaults_to_collapsed() {
-        let state = JsonTreeState::default();
-        let path = vec![
-            PathSegment::Key("a".to_string()),
-            PathSegment::Key("b".to_string()),
-        ];
-        assert!(!state.is_expanded(&path, 2));
+        assert!(state.is_expanded(&[], 0));
+        assert!(state.is_expanded(&[PathSegment::Key("field".to_string())], 1));
+        assert!(state.is_expanded(
+            &[
+                PathSegment::Key("a".to_string()),
+                PathSegment::Key("b".to_string())
+            ],
+            2
+        ));
     }
 
     // -----------------------------------------------------------------------

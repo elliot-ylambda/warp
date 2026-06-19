@@ -1597,6 +1597,14 @@ impl View for RequestedCommandView {
                         anchor_id,
                     });
                 });
+                let on_toggle_string_req: Arc<
+                    dyn Fn(&mut EventContext, Vec<PathSegment>) + Send + Sync,
+                > = Arc::new(|ctx, path| {
+                    ctx.dispatch_typed_action(RequestedCommandViewAction::ToggleJsonString {
+                        path,
+                        tree: McpTree::Request,
+                    });
+                });
                 render_json_tree(
                     &mcp_request.args,
                     Some("Request"),
@@ -1604,6 +1612,7 @@ impl View for RequestedCommandView {
                     &colors,
                     &format!("{}-req", self.position_id_prefix),
                     on_toggle_req,
+                    on_toggle_string_req,
                     on_copy_req,
                     appearance,
                 )
@@ -1661,6 +1670,16 @@ impl View for RequestedCommandView {
                                 },
                             );
                         });
+                        let on_toggle_string_resp: Arc<
+                            dyn Fn(&mut EventContext, Vec<PathSegment>) + Send + Sync,
+                        > = Arc::new(|ctx, path| {
+                            ctx.dispatch_typed_action(
+                                RequestedCommandViewAction::ToggleJsonString {
+                                    path,
+                                    tree: McpTree::Response,
+                                },
+                            );
+                        });
                         render_json_tree(
                             &value,
                             Some("Response"),
@@ -1668,6 +1687,7 @@ impl View for RequestedCommandView {
                             &colors,
                             &format!("{}-resp", self.position_id_prefix),
                             on_toggle_resp,
+                            on_toggle_string_resp,
                             on_copy_resp,
                             appearance,
                         )

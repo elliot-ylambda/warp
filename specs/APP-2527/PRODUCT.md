@@ -57,8 +57,8 @@ Long string elision (collapsed → expanded):
 12. An empty object renders as `{} 0 keys` and an empty array as `[] 0 items`; they have no chevron and do not respond to click, and never expand to an empty body.
 
 ### Default expansion state
-13. On first render of a tool call's detail, the root request object and root response value are expanded so the user immediately sees top-level fields. Nested objects/arrays default to collapsed.
-14. **Open question:** whether deeply/large trees should auto-collapse the root too (e.g. when the root has more than N children) to avoid a wall of rows. Default assumption: root expanded, descendants collapsed, regardless of size.
+13. On first render of a tool call's detail, all nodes in the tree are expanded by default so the user immediately sees the full structure. The tree body is scrollable and height-capped, so a large tree does not push subsequent blocks off-screen.
+14. There is no auto-collapse cap based on node count: the tree is fully open by default regardless of size.
 15. Expansion state is per tool-call-detail view state. It persists while the conversation stays open (collapsing and re-expanding the action header restores the user's last per-node expansion state for that tool call rather than resetting to defaults). It does not need to persist across app restarts or conversation reloads.
 16. If a tool call response arrives while the action header is collapsed, the response data is retained; expanding the header shows both the request and response trees. No data is lost due to the header being collapsed at the time of response arrival.
 17. The tree body scrolls vertically when the expanded tree exceeds the height of the action detail container. A maximum height cap is applied to the tree body (consistent with the existing max-height cap used for command editor bodies) so that a fully expanded tree does not push subsequent blocks off-screen. Scrolling the tree does not interfere with scrolling the outer block list.
