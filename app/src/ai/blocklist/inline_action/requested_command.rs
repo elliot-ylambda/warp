@@ -17,8 +17,8 @@ use warpui::elements::{
     Align, Border, ChildAnchor, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox,
     Container, CornerRadius, CrossAxisAlignment, Dismiss, Empty, Expanded, Flex, MainAxisSize,
     MouseStateHandle, OffsetPositioning, ParentElement, PositionedElementAnchor,
-    PositionedElementOffsetBounds, Radius, SavePosition, ScrollbarWidth, SelectableArea,
-    SelectionHandle, Stack, Text,
+    PositionedElementOffsetBounds, Radius, SavePosition, ScrollbarWidth, SelectionHandle, Stack,
+    Text,
 };
 use warpui::keymap::{Context, EditableBinding, FixedBinding, Keystroke};
 use warpui::ui_components::components::UiComponent as _;
@@ -1720,26 +1720,12 @@ impl View for RequestedCommandView {
                 .with_max_height(MAX_EDITOR_HEIGHT)
                 .finish();
 
-            let mcp_selected_text = self.mcp_content_selected_text.clone();
-            let selectable_content = SelectableArea::new(
-                self.mcp_content_selection_handle.clone(),
-                #[allow(clippy::unwrap_used)]
-                move |selection_args, _, _| {
-                    *mcp_selected_text.write().unwrap() = selection_args.selection;
-                },
-                constrained,
-            )
-            .on_selection_updated(|ctx, _| {
-                ctx.dispatch_typed_action(RequestedCommandViewAction::SelectText);
-            })
-            .finish();
-
             // SavePosition allows the context menu to be anchored below this section.
             let mcp_section_position_id =
                 Self::get_mcp_section_position_id(&self.position_id_prefix);
             content.add_child(
                 SavePosition::new(
-                    Container::new(selectable_content)
+                    Container::new(constrained)
                         .with_horizontal_padding(INLINE_ACTION_HORIZONTAL_PADDING)
                         .with_vertical_padding(REQUESTED_COMMAND_BODY_VERTICAL_PADDING)
                         .with_background(theme.background())
