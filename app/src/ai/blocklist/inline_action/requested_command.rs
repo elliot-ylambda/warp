@@ -14,10 +14,11 @@ use warp_editor::render::element::VerticalExpansionBehavior;
 use warpui::clipboard::ClipboardContent;
 use warpui::elements::{
     new_scrollable::{NewScrollable, ScrollableAppearance, SingleAxisConfig},
-    Align, Border, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox, Container,
-    CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex, MainAxisSize, MouseStateHandle,
-    OffsetPositioning, ParentElement, Radius, ScrollbarWidth, SelectableArea, SelectionHandle,
-    Stack, Text,
+    Align, Border, ChildAnchor, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox,
+    Container, CornerRadius, CrossAxisAlignment, Dismiss, Empty, Expanded, Flex, MainAxisSize,
+    MouseStateHandle, OffsetPositioning, ParentElement, PositionedElementAnchor,
+    PositionedElementOffsetBounds, Radius, SavePosition, ScrollbarWidth, SelectableArea,
+    SelectionHandle, Stack, Text,
 };
 use warpui::keymap::{Context, EditableBinding, FixedBinding, Keystroke};
 use warpui::ui_components::components::UiComponent as _;
@@ -54,14 +55,14 @@ use crate::ai::blocklist::{
 use crate::cmd_or_ctrl_shift;
 use crate::code::editor::view::{CodeEditorEvent, CodeEditorRenderOptions, CodeEditorView};
 use crate::editor::InteractionState;
-use crate::menu::{Event as MenuEvent, Menu, MenuItemFields, MenuVariant};
+use crate::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields, MenuVariant};
 use crate::settings::InputModeSettings;
 use crate::terminal::block_list_viewport::InputMode;
 use crate::terminal::model::block::Block;
 use crate::terminal::TerminalModel;
 use crate::ui_components::blended_colors;
 use crate::ui_components::json_tree::{
-    render_json_tree, JsonTreeColors, JsonTreeState, PathSegment,
+    render_json_tree, JsonTreeColors, JsonTreeState, PathSegment, TREE_FONT_SIZE,
 };
 use crate::util::bindings::keybinding_name_to_keystroke;
 use crate::view_components::action_button::{ButtonSize, KeystrokeSource, NakedTheme};
@@ -278,11 +279,20 @@ pub enum RequestedCommandViewAction {
     },
     /// Write the given JSON text to the system clipboard.
     ///
-    /// Dispatched by the "Copy JSON" right-click handler on tree rows, which
-    /// runs inside an EventContext and therefore cannot call clipboard() directly.
+    /// Triggered from the "Copy JSON" item in the right-click context menu.
     CopyJsonToClipboard {
         text: String,
     },
+    /// Open the right-click context menu for an MCP JSON tree row, pre-loading
+    /// the subtree JSON that "Copy JSON" will write to the clipboard.
+    ShowMcpContextMenu {
+        json_text: String,
+    },
+    /// Copy the currently selected text in the MCP JSON tree to the clipboard.
+    /// Used by the "Copy" item in the right-click context menu.
+    CopyMcpSelection,
+    /// Dismiss the MCP JSON tree right-click context menu without taking action.
+    CloseMcpContextMenu,
 }
 
 pub struct RequestedCommandView {
@@ -338,6 +348,9 @@ pub struct RequestedCommandView {
     mcp_response_tree_state: JsonTreeState,
     // Scroll state for the MCP JSON tree body, shared across renders to preserve scroll position.
     mcp_scroll_state: ClippedScrollStateHandle,
+    // Right-click context menu for MCP JSON tree rows (Copy / Copy JSON items).
+    mcp_context_menu: ViewHandle<Menu<RequestedCommandViewAction>>,
+    mcp_context_menu_open: bool,
 }
 
 impl RequestedCommandView {
@@ -544,6 +557,21 @@ impl RequestedCommandView {
             MenuEvent::ItemSelected | MenuEvent::ItemHovered => {}
         });
 
+        let mcp_context_menu = ctx.add_typed_action_view(|ctx| {
+            let theme = Appearance::as_ref(ctx).theme();
+            Menu::new()
+                .with_menu_variant(MenuVariant::Fixed)
+                .with_border(Border::all(1.).with_border_fill(theme.outline()))
+                .prevent_interaction_with_other_elements()
+        });
+        ctx.subscribe_to_view(&mcp_context_menu, |me, _menu, event, ctx| match event {
+            MenuEvent::Close { .. } => {
+                me.mcp_context_menu_open = false;
+                ctx.notify();
+            }
+            MenuEvent::ItemSelected | MenuEvent::ItemHovered => {}
+        });
+
         Self {
             command_text: String::new(),
             editor: None,
@@ -576,6 +604,8 @@ impl RequestedCommandView {
             mcp_request_tree_state: Default::default(),
             mcp_response_tree_state: Default::default(),
             mcp_scroll_state: Default::default(),
+            mcp_context_menu,
+            mcp_context_menu_open: false,
         }
     }
 
@@ -715,6 +745,10 @@ impl RequestedCommandView {
 
     fn get_position_id_for_accept_split_button(prefix: &str) -> String {
         format!("RequestedCommandView-{prefix}-accept-split")
+    }
+
+    fn get_mcp_section_position_id(prefix: &str) -> String {
+        format!("RequestedCommandView-{prefix}-mcp-section")
     }
 
     pub fn is_header_expanded(&self) -> bool {
@@ -1536,7 +1570,6 @@ impl View for RequestedCommandView {
         if should_render_mcp_content {
             let colors = JsonTreeColors::from_theme(theme);
             let font_family = appearance.ui_font_family();
-            let tree_font_size = 12.0_f32;
 
             let mut tree_column =
                 Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
@@ -1551,12 +1584,15 @@ impl View for RequestedCommandView {
                         tree: McpTree::Request,
                     });
                 });
+                // Right-click opens a context menu (Copy / Copy JSON) rather than
+                // writing directly to the clipboard, so the user can opt into copying
+                // only the selection or the full subtree JSON.
                 let on_copy_req: Arc<
                     dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync,
                 > = Arc::new(|ctx, _path, value| {
-                    let text = serde_json::to_string_pretty(&value).unwrap_or_default();
-                    ctx.dispatch_typed_action(RequestedCommandViewAction::CopyJsonToClipboard {
-                        text,
+                    let json_text = serde_json::to_string_pretty(&value).unwrap_or_default();
+                    ctx.dispatch_typed_action(RequestedCommandViewAction::ShowMcpContextMenu {
+                        json_text,
                     });
                 });
                 render_json_tree(
@@ -1571,13 +1607,13 @@ impl View for RequestedCommandView {
             } else {
                 let mut col = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
                 col.add_child(
-                    Text::new_inline("Request".to_string(), font_family, tree_font_size)
+                    Text::new_inline("Request".to_string(), font_family, TREE_FONT_SIZE)
                         .with_color(colors.annotation)
                         .soft_wrap(false)
                         .finish(),
                 );
                 col.add_child(
-                    Text::new_inline("(no arguments)".to_string(), font_family, tree_font_size)
+                    Text::new_inline("(no arguments)".to_string(), font_family, TREE_FONT_SIZE)
                         .with_color(colors.annotation)
                         .soft_wrap(false)
                         .finish(),
@@ -1613,9 +1649,10 @@ impl View for RequestedCommandView {
                                 + Send
                                 + Sync,
                         > = Arc::new(|ctx, _path, value| {
-                            let text = serde_json::to_string_pretty(&value).unwrap_or_default();
+                            let json_text =
+                                serde_json::to_string_pretty(&value).unwrap_or_default();
                             ctx.dispatch_typed_action(
-                                RequestedCommandViewAction::CopyJsonToClipboard { text },
+                                RequestedCommandViewAction::ShowMcpContextMenu { json_text },
                             );
                         });
                         render_json_tree(
@@ -1632,13 +1669,13 @@ impl View for RequestedCommandView {
                         let mut col =
                             Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
                         col.add_child(
-                            Text::new_inline("Response".to_string(), font_family, tree_font_size)
+                            Text::new_inline("Response".to_string(), font_family, TREE_FONT_SIZE)
                                 .with_color(colors.annotation)
                                 .soft_wrap(false)
                                 .finish(),
                         );
                         col.add_child(
-                            Text::new(format!("Error: {e}"), font_family, tree_font_size)
+                            Text::new(format!("Error: {e}"), font_family, TREE_FONT_SIZE)
                                 .with_color(theme.ui_error_color())
                                 .with_selectable(true)
                                 .finish(),
@@ -1649,13 +1686,13 @@ impl View for RequestedCommandView {
                         let mut col =
                             Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
                         col.add_child(
-                            Text::new_inline("Response".to_string(), font_family, tree_font_size)
+                            Text::new_inline("Response".to_string(), font_family, TREE_FONT_SIZE)
                                 .with_color(colors.annotation)
                                 .soft_wrap(false)
                                 .finish(),
                         );
                         col.add_child(
-                            Text::new_inline("Cancelled".to_string(), font_family, tree_font_size)
+                            Text::new_inline("Cancelled".to_string(), font_family, TREE_FONT_SIZE)
                                 .with_color(colors.annotation)
                                 .soft_wrap(false)
                                 .finish(),
@@ -1668,13 +1705,11 @@ impl View for RequestedCommandView {
 
             // Wrap the tree in a vertically scrollable area capped at MAX_EDITOR_HEIGHT
             // so a deeply expanded tree doesn't push subsequent blocks off-screen.
+            // Padding is on the outer Container to match the shell-command body layout.
             let scrollable = NewScrollable::vertical(
                 SingleAxisConfig::Clipped {
                     handle: self.mcp_scroll_state.clone(),
-                    child: Container::new(tree_column.finish())
-                        .with_horizontal_padding(INLINE_ACTION_HORIZONTAL_PADDING)
-                        .with_vertical_padding(REQUESTED_COMMAND_BODY_VERTICAL_PADDING)
-                        .finish(),
+                    child: tree_column.finish(),
                 },
                 theme.nonactive_ui_detail().into(),
                 theme.active_ui_detail().into(),
@@ -1702,16 +1737,21 @@ impl View for RequestedCommandView {
             })
             .finish();
 
+            // SavePosition allows the context menu to be anchored below this section.
+            let mcp_section_position_id =
+                Self::get_mcp_section_position_id(&self.position_id_prefix);
             content.add_child(
-                Container::new(selectable_content)
-                    .with_background(theme.background())
-                    .with_corner_radius(CornerRadius::with_bottom(Radius::Pixels(8.)))
-                    .finish(),
+                SavePosition::new(
+                    Container::new(selectable_content)
+                        .with_horizontal_padding(INLINE_ACTION_HORIZONTAL_PADDING)
+                        .with_vertical_padding(REQUESTED_COMMAND_BODY_VERTICAL_PADDING)
+                        .with_background(theme.background())
+                        .with_corner_radius(CornerRadius::with_bottom(Radius::Pixels(8.)))
+                        .finish(),
+                    &mcp_section_position_id,
+                )
+                .finish(),
             );
-        }
-
-        if let Some(footer) = self.maybe_render_footer(app) {
-            content.add_child(Clipped::new(footer).finish());
         }
 
         let border_color = if action_status
@@ -1789,9 +1829,27 @@ impl View for RequestedCommandView {
                 OffsetPositioning::offset_from_save_position_element(
                     Self::get_position_id_for_accept_split_button(&self.position_id_prefix),
                     vec2f(0., 8.),
-                    warpui::elements::PositionedElementOffsetBounds::WindowByPosition,
-                    warpui::elements::PositionedElementAnchor::BottomRight,
-                    warpui::elements::ChildAnchor::TopRight,
+                    PositionedElementOffsetBounds::WindowByPosition,
+                    PositionedElementAnchor::BottomRight,
+                    ChildAnchor::TopRight,
+                ),
+            );
+        }
+
+        if self.mcp_context_menu_open {
+            root_stack.add_positioned_child(
+                Dismiss::new(ChildView::new(&self.mcp_context_menu).finish())
+                    .on_dismiss(|ctx, _app| {
+                        ctx.dispatch_typed_action(RequestedCommandViewAction::CloseMcpContextMenu);
+                    })
+                    .prevent_interaction_with_other_elements()
+                    .finish(),
+                OffsetPositioning::offset_from_save_position_element(
+                    Self::get_mcp_section_position_id(&self.position_id_prefix),
+                    vec2f(0., 0.),
+                    PositionedElementOffsetBounds::WindowByPosition,
+                    PositionedElementAnchor::BottomLeft,
+                    ChildAnchor::TopLeft,
                 ),
             );
         }
@@ -1844,6 +1902,8 @@ impl TypedActionView for RequestedCommandView {
                 ctx.emit(RequestedCommandViewEvent::TextSelected);
             }
             RequestedCommandViewAction::ToggleJsonNode { path, tree } => {
+                // A node's depth in the tree always equals its path length: the root
+                // has an empty path (depth 0) and each level down adds one segment.
                 let depth = path.len();
                 match tree {
                     McpTree::Request => self.mcp_request_tree_state.toggle(path, depth),
@@ -1861,6 +1921,52 @@ impl TypedActionView for RequestedCommandView {
             RequestedCommandViewAction::CopyJsonToClipboard { text } => {
                 ctx.clipboard()
                     .write(ClipboardContent::plain_text(text.clone()));
+            }
+            RequestedCommandViewAction::ShowMcpContextMenu { json_text } => {
+                // Determine whether the Copy item should be enabled based on whether
+                // there is currently a non-empty text selection in the MCP section.
+                #[allow(clippy::unwrap_used)]
+                let has_selection = self
+                    .mcp_content_selected_text
+                    .read()
+                    .unwrap()
+                    .as_deref()
+                    .is_some_and(|t| !t.is_empty());
+
+                let copy_item: MenuItem<RequestedCommandViewAction> = MenuItemFields::new("Copy")
+                    .with_on_select_action(RequestedCommandViewAction::CopyMcpSelection)
+                    .with_disabled(!has_selection)
+                    .into_item();
+
+                let json_for_menu = json_text.clone();
+                let copy_json_item: MenuItem<RequestedCommandViewAction> =
+                    MenuItemFields::new("Copy JSON")
+                        .with_on_select_action(RequestedCommandViewAction::CopyJsonToClipboard {
+                            text: json_for_menu,
+                        })
+                        .into_item();
+
+                self.mcp_context_menu.update(ctx, move |menu, ctx| {
+                    menu.set_items(vec![copy_item, copy_json_item], ctx);
+                });
+                self.mcp_context_menu_open = true;
+                ctx.notify();
+            }
+            RequestedCommandViewAction::CopyMcpSelection => {
+                #[allow(clippy::unwrap_used)]
+                if let Some(text) = self
+                    .mcp_content_selected_text
+                    .read()
+                    .unwrap()
+                    .clone()
+                    .filter(|t| !t.is_empty())
+                {
+                    ctx.clipboard().write(ClipboardContent::plain_text(text));
+                }
+            }
+            RequestedCommandViewAction::CloseMcpContextMenu => {
+                self.mcp_context_menu_open = false;
+                ctx.notify();
             }
         }
     }

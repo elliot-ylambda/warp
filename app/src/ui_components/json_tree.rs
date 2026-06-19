@@ -35,7 +35,7 @@ const INDENT_PX: f32 = 12.;
 const CHEVRON_SIZE: f32 = 12.;
 
 /// The font size used for all tree rows.
-const TREE_FONT_SIZE: f32 = 12.;
+pub const TREE_FONT_SIZE: f32 = 12.;
 
 /// Strings longer than this character count, or containing `\n`, are elided
 /// by default and can be expanded in place.
