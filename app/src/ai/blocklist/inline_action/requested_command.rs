@@ -1709,7 +1709,6 @@ impl TypedActionView for RequestedCommandView {
             }
             RequestedCommandViewAction::ToggleJsonNode { path, tree } => {
                 let depth = path.len();
-                let path = path.clone();
                 match tree {
                     McpTree::Request => self.mcp_request_tree_state.toggle(path, depth),
                     McpTree::Response => self.mcp_response_tree_state.toggle(path, depth),
@@ -1717,7 +1716,6 @@ impl TypedActionView for RequestedCommandView {
                 ctx.notify();
             }
             RequestedCommandViewAction::ToggleJsonString { path, tree } => {
-                let path = path.clone();
                 match tree {
                     McpTree::Request => self.mcp_request_tree_state.toggle_string(path),
                     McpTree::Response => self.mcp_response_tree_state.toggle_string(path),
