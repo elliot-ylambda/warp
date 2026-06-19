@@ -15,7 +15,7 @@ Key existing code:
 - [`app/src/ai/blocklist/action_model/execute/call_mcp_tool.rs` (105-126, 169-286) @ 46265f4](https://github.com/warpdotdev/warp/blob/46265f499a3a32a488f640c0fce7565bb763496f/app/src/ai/blocklist/action_model/execute/call_mcp_tool.rs#L105-L126) — `coerce_integer_args` (`pub(crate)`), already reused by `block.rs`.
 - [`crates/ai/src/agent/action_result/mod.rs` (1056-1077) @ 46265f4](https://github.com/warpdotdev/warp/blob/46265f499a3a32a488f640c0fce7565bb763496f/crates/ai/src/agent/action_result/mod.rs#L1056-L1077) — `CallMCPToolResult::Success { result: rmcp::model::CallToolResult }`, `Error(String)`, `Cancelled`. `CallToolResult` carries `structured_content: Option<serde_json::Value>` and `content: Vec<Content>` (text items).
 - [`crates/warp_core/src/ui/theme/color.rs` (361-424) @ 46265f4](https://github.com/warpdotdev/warp/blob/46265f499a3a32a488f640c0fce7565bb763496f/crates/warp_core/src/ui/theme/color.rs#L361-L424) — `WarpTheme` ANSI accessors (`ansi_fg_green/yellow/blue/cyan/magenta`) and `internal_colors::{text_main, text_sub, text_disabled}`.
-- [`app/src/ai/blocklist/inline_action/inline_action_header.rs` (96-107) @ 46265f4](https://github.com/warpdotdev/warp/blob/46265f499a3a32a488f640c0fce7565bb763496f/app/src/ai/blocklist/inline_action/inline_action_header.rs#L96-L107) — existing chevron/expansion plumbing (`render_expansion_icon`) for visual consistency.
+- [`app/src/ai/blocklist/inline_action/inline_action_header.rs` (96-107) @ 46265f4](https://github.com/warpdotdev/warp/blob/46265f499a3a32a488f640c0fce7565bb763496f/app/src/ai/blocklist/inline_action/inline_action_header.rs#L96-L107) — existing chevron/expansion plumbing for reference; the generic component uses `Icon::ChevronRight`/`Icon::ChevronDown` from `warpui` directly rather than importing `render_expansion_icon`, to avoid a wrong-direction module dependency.
 
 See `PRODUCT.md` for user-visible behavior; this spec does not restate it.
 
@@ -24,7 +24,15 @@ See `PRODUCT.md` for user-visible behavior; this spec does not restate it.
 ### A. Widget architecture: where does the tree component live?
 
 **Option A1 — Generic `warpui`-level component (recommended)**
-Add a standalone `JsonTreeView` as a `warpui`-level element (e.g. in `crates/warpui/src/elements/json_tree.rs` or a new `app/src/ui_components/json_tree.rs`). The component takes a `&serde_json::Value`, a `JsonTreeState` (expansion map), a `JsonTreeColors` (pre-resolved theme colors), and callbacks for toggle/copy, and returns a `Box<dyn Element>`. It has no dependency on agent-specific types.
+Add a standalone `JsonTreeView` as a `warpui`-level element in `app/src/ui_components/json_tree.rs` (same layer as other reusable view utilities, avoiding a `serde_json` dependency in the `warpui` crate itself). The component takes a `&serde_json::Value`, a `JsonTreeState` (expansion map), a `JsonTreeColors` (pre-resolved theme colors), and callbacks for toggle/copy, and returns a `Box<dyn Element>`. It has no dependency on agent-specific types.
+
+The `JsonTreeColors` mapping (resolved from `WarpTheme` at render time, no hard-coded values):
+- key / index → `theme.ansi_fg_cyan()`
+- string value → `theme.ansi_fg_green()`
+- number value → `theme.ansi_fg_yellow()`
+- bool value → `theme.ansi_fg_magenta()`
+- null value → `internal_colors::text_disabled(theme, background)`
+- type/size annotation (`{} 4 keys`) and punctuation → `internal_colors::text_sub(theme, background)`
 
 Pros:
 - Directly reusable for `ReadMCPResourceResult`, structured agent outputs, settings inspectors, or any future surface showing JSON.
@@ -46,7 +54,7 @@ Cons:
 - Code is not reusable without copy-paste or moving it later.
 - Conflates MCP-specific logic (result parsing, integer coercion) with generic tree rendering.
 
-**Recommendation: A1.** The minimal extra setup pays off immediately — `ReadMCPResourceResult` is the obvious next user. We can house it in `app/src/ui_components/json_tree.rs` (same layer as other reusable view utilities) to avoid a warpui crate dependency on `serde_json`.
+**Recommendation: A1.** The minimal extra setup pays off immediately — `ReadMCPResourceResult` is the obvious next user, and the generic component is the right level of abstraction.
 
 ---
 
@@ -165,16 +173,17 @@ The implementation naturally divides into three phases. Each phase is independen
 
 **Files:**
 - `app/src/ui_components/json_tree.rs` (new) — the `JsonTreeView` component. Public surface:
-  - `pub struct JsonTreeColors` — resolved `ColorU`s per value type, built from `WarpTheme` (see Design §A1 for mapping).
-  - `pub struct JsonTreeState` — `HashMap<JsonPath, bool>` for node expansion + long-string expansion (Design §C1). `JsonPath = Rc<[PathSegment]>`; `PathSegment = Key(String) | Index(usize)`. Methods: `is_expanded(path, depth) -> bool` (default: expanded at depth 0, collapsed deeper), `toggle(path)`.
-  - `pub fn render_json_tree(root, root_label, state, colors, on_toggle, on_copy_json, appearance) -> Box<dyn Element>` — builds a `Flex::column` of rows (Design §B1). Each row is a `Flex::row` of: indent spacer (depth × `INDENT_PX = 12.`), chevron icon (only for containers/long strings), `FormattedTextElement` of colored key/value spans, and a right-click `Hoverable` (Design §E1) that opens a `Menu` with Copy and Copy JSON items.
+  - `pub struct JsonTreeColors` — resolved `ColorU`s per value type, built from `WarpTheme` per the mapping in Design §A1.
+  - `pub struct JsonTreeState` — two `HashMap<Vec<PathSegment>, bool>` maps: one for node expansion, one for long-string expansion. `PathSegment = Key(String) | Index(usize)`. `Vec<PathSegment>` derives `Hash + Eq` and is used directly as the key (no `Rc` indirection needed). Methods: `is_expanded(path, depth) -> bool` (default: `true` at depth 0, `false` deeper), `toggle(path)`.
+  - `const LONG_STRING_THRESHOLD: usize = 120` — strings longer than this character count, or containing a `\n`, are elided by default.
+  - `pub fn render_json_tree(root: &serde_json::Value, root_label: Option<&str>, state: &JsonTreeState, colors: &JsonTreeColors, on_toggle: impl Fn(Vec<PathSegment>), on_copy_json: impl Fn(Vec<PathSegment>, &serde_json::Value), appearance: &Appearance) -> Box<dyn Element>` — builds a `Flex::column` of rows (Design §B1). Each row is a `Flex::row` of: indent spacer (depth × `INDENT_PX = 12.`), chevron (`Icon::ChevronRight` when collapsed, `Icon::ChevronDown` when expanded — standard `warpui` icons, no import from `inline_action`), `FormattedTextElement` of colored key/value spans, and a right-click `Hoverable` (Design §E1) that opens a `Menu` with Copy and Copy JSON items.
 - `app/src/ui_components/mod.rs` — declare `json_tree`.
-- `app/src/ui_components/json_tree_tests.rs` (new, `#[cfg(test)]`) — pure logic tests:
+- `app/src/ui_components/json_tree_tests.rs` (new, `#[cfg(test)]`) — pure logic tests covering only Phase 1 functionality:
   - Annotation formatting: `{} 0/1/N keys`, `[] 0/1/N items` (Behavior 8, 12).
-  - Long-string detection at/over threshold and multi-line (Behavior 19-22).
-  - Integer rendering: whole-float → integer (Behavior 29); duplicate keys retained (Behavior 30).
+  - Long-string detection at/over `LONG_STRING_THRESHOLD` and multi-line strings (Behavior 21-24).
+  - Integer rendering: whole-float → integer (Behavior 30); duplicate keys retained (Behavior 31).
   - `JsonTreeState::toggle` independence: toggling one path leaves other paths unchanged (Behavior 9, 15).
-  - `mcp_result_to_value` normalization (see Phase 2).
+  - Empty container: no expansion possible (Behavior 12).
 
 **No changes to agent or MCP code. Reviewable alone.**
 
@@ -196,8 +205,8 @@ The implementation naturally divides into three phases. Each phase is independen
   ```
   Logic: `Success { result }` → prefer `result.structured_content`; else try `serde_json::from_str` on joined text content; else wrap in a JSON `String` value. `Error(e)` → `McpRenderable::Error(e)`. `Cancelled` → `McpRenderable::Cancelled`.
 
-**Unit tests for `mcp_result_to_renderable` added to `json_tree_tests.rs`.**
-**No visible UI change; old `Text` render path still active. Reviewable alone.**
+**Unit tests for `mcp_result_to_renderable` added to `json_tree_tests.rs`** (Behavior 28, 29).
+**No user-visible UI change; the old `Text` render path remains active. New action enum variants and fields are code changes but produce no visible difference. Reviewable alone.**
 
 ---
 
@@ -208,39 +217,43 @@ The implementation naturally divides into three phases. Each phase is independen
 **Files:**
 - `app/src/ai/blocklist/inline_action/requested_command.rs` (`should_render_mcp_content` block, lines 1430-1483):
   - Replace `content_text`/single-`Text` with two labeled sections (Request + Response divider, Behavior 4) each calling `render_json_tree(...)`.
-  - Request section: `render_json_tree(&self.mcp_request.args, "Request", &self.mcp_tree_state, &colors, ...)` (or `null` indicator when `mcp_request` is absent, Behavior 28).
-  - Response section: present only when `action_status.finished_result()` exists; dispatches to tree, error label (`Text` with `ui_error_color`), or cancelled label (Behavior 27).
-  - The sections stay inside the current `Container` (padding, background, corner radius) so layout is unchanged (Behavior 32).
-  - The `SelectableArea` + `mcp_content_selection_handle` wraps the whole tree column so text selection/copy still works (Behavior 23).
-  - Right-click "Copy JSON" in `on_copy_json` callback: serialize the subtree at the received `JsonPath` using `serde_json::to_string_pretty`, write to clipboard.
+  - Request section: `render_json_tree(&self.mcp_request.args, "Request", &self.mcp_tree_state, &colors, ...)` (or `null` indicator when `mcp_request` is absent, Behavior 29).
+  - Response section: present only when `action_status.finished_result()` exists; dispatches to tree, error label (`Text` with `ui_error_color`), or cancelled label (Behavior 28).
+  - Tree body is wrapped in a `ConstrainedBox::with_max_height(MAX_EDITOR_HEIGHT)` and a vertical `NewScrollable` so it scrolls rather than growing unbounded (Behavior 17).
+  - The `SelectableArea` + `mcp_content_selection_handle` wraps the scrollable tree so text selection/copy still works (Behavior 25). See Risks re: `Hoverable` interaction.
+  - Right-click "Copy JSON" in `on_copy_json` callback: walk the `serde_json::Value` at the received path, serialize with `serde_json::to_string_pretty`, write to clipboard (Behavior 27).
 - Remove the now-dead `.bak` intermediates (cleanup).
 
 **Manual validation checklist** (attached to the PR, to be checked before merging):
 - Configure a local MCP server (e.g. filesystem) and expand a tool call: root expanded, nested collapsed (Behavior 13), chevrons toggle independently (Behavior 9), indentation per level (Behavior 10).
-- Large/nested response: Request/Response labels + divider visible (Behavior 4), typed colors for all value types (Behavior 16-18), light↔dark theme switch recolors without restart (Behavior 17).
-- Long string (file contents): elision preview + chevron, expands/collapses in place without disturbing siblings (Behavior 19-20).
-- Error and cancelled tool calls show labeled messages (Behavior 27).
-- Right-click → Copy JSON on a collapsed container copies complete JSON (Behavior 25).
+- Large/nested response: Request/Response labels + divider visible (Behavior 4), typed colors for all value types (Behavior 18-20), light↔dark theme switch recolors without restart (Behavior 19).
+- Long string (file contents): elision preview + chevron, expands/collapses in place without disturbing siblings (Behavior 21-22).
+- Very tall expanded tree: tree scrolls, does not push subsequent blocks off-screen (Behavior 17).
+- Response arrives while header is collapsed: expand header to confirm both request and response trees are shown (Behavior 16).
+- Error and cancelled tool calls show labeled messages (Behavior 28).
+- Right-click → Copy JSON on a collapsed container copies complete JSON (Behavior 27).
 - Right-click → Copy JSON on the Request label copies the full request JSON (Behavior 26).
-- Text selection and copy across key/value rows works (Behavior 23).
-- Collapsed header, accept/reject, and a non-MCP action (shell command) are visually unchanged (Behavior 1, 32-34).
+- Copy with no selection is a no-op; Copy menu item is greyed out (Behavior 25).
+- Text selection and copy across key/value rows works (Behavior 25).
+- Collapsed header, accept/reject, and a non-MCP action (shell command) are visually unchanged (Behavior 1, 33-35).
 - Screenshots of expanded tree in dark and light themes attached to the PR.
 
 ## Testing and validation summary
 
 | Invariant(s) | Test type | Where |
 |---|---|---|
-| Annotation labels (8, 12) | Unit | `json_tree_tests.rs` |
-| Toggle independence (9, 15) | Unit | `json_tree_tests.rs` |
-| Long string detection (19-22) | Unit | `json_tree_tests.rs` |
-| Integer/unusual values (29-30) | Unit | `json_tree_tests.rs` |
-| `mcp_result_to_renderable` (27) | Unit | `json_tree_tests.rs` |
-| Null/absent request (28) | Unit | `json_tree_tests.rs` |
-| Streaming expansion stability (31) | Unit | `json_tree_tests.rs` |
+| Annotation labels (8, 12) | Unit | `json_tree_tests.rs` (Phase 1) |
+| Toggle independence (9, 15) | Unit | `json_tree_tests.rs` (Phase 1) |
+| Long string detection (21-24) | Unit | `json_tree_tests.rs` (Phase 1) |
+| Integer/unusual values (30-31) | Unit | `json_tree_tests.rs` (Phase 1) |
+| `mcp_result_to_renderable` (28) | Unit | `json_tree_tests.rs` (Phase 2) |
+| Null/absent request (29) | Unit | `json_tree_tests.rs` (Phase 2) |
+| Streaming expansion stability (32) | Unit | `json_tree_tests.rs` (Phase 2) |
 | All visual/interaction behaviors | Manual | PR checklist (Phase 3) |
 
 ## Risks and mitigations
 - **Performance on very large payloads.** Mitigated by rendering only expanded nodes (Design §B1); a "show first N / show more" cap can be added inside `JsonTreeView` as a follow-up without changing callers.
+- **`SelectableArea` + per-row `Hoverable` interaction.** Each tree row uses `Hoverable` for right-click. Wrapping those rows in the existing `SelectableArea` may cause mouse event conflicts (the `Hoverable` right-click handler consuming events before `SelectableArea` sees them, or vice versa). The implementor should verify event propagation and may need to use `DispatchEventResult::Consumed` appropriately on the right-click path to prevent double-handling. This is the highest-risk interaction in Phase 3 and should be tested explicitly with the context menu open over a text selection.
 - **Selection regression.** The current single-`Text` selection is well-understood; wrapping the tree in the same `SelectableArea`/`SelectionHandle` with `FormattedTextElement` keeps the selection model intact — called out explicitly in the Phase 3 PR for reviewer attention.
 - **Streaming flicker.** Path-keyed state (Design §C1) prevents losing expansion when request args stream in; covered by unit tests.
 - **Copy JSON clipboard access.** Clipboard writes already work in other right-click menus in the app; same mechanism applies here.
@@ -249,3 +262,4 @@ The implementation naturally divides into three phases. Each phase is independen
 - Auto-collapse of very large roots (Behavior 14 open question).
 - Reuse `JsonTreeView` for `ReadMCPResourceResult` and other JSON-bearing surfaces (natural next consumer after Phase 3 ships).
 - Potential virtualization for pathologically large expanded trees (Design §B2), if needed.
+- Confirm or update `LONG_STRING_THRESHOLD = 120` based on real-world MCP payloads seen in dogfooding.
