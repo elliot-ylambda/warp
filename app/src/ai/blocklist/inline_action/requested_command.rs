@@ -11,10 +11,13 @@ use settings::Setting as _;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::Icon;
 use warp_editor::render::element::VerticalExpansionBehavior;
+use warpui::clipboard::ClipboardContent;
 use warpui::elements::{
-    Align, Border, ChildView, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
-    Expanded, Flex, MainAxisSize, MouseStateHandle, OffsetPositioning, ParentElement, Radius,
-    ScrollbarWidth, SelectableArea, SelectionHandle, Stack, Text,
+    new_scrollable::{NewScrollable, ScrollableAppearance, SingleAxisConfig},
+    Align, Border, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox, Container,
+    CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex, MainAxisSize, MouseStateHandle,
+    OffsetPositioning, ParentElement, Radius, ScrollbarWidth, SelectableArea, SelectionHandle,
+    Stack, Text,
 };
 use warpui::keymap::{Context, EditableBinding, FixedBinding, Keystroke};
 use warpui::ui_components::components::UiComponent as _;
@@ -57,7 +60,9 @@ use crate::terminal::block_list_viewport::InputMode;
 use crate::terminal::model::block::Block;
 use crate::terminal::TerminalModel;
 use crate::ui_components::blended_colors;
-use crate::ui_components::json_tree::{JsonTreeState, PathSegment};
+use crate::ui_components::json_tree::{
+    render_json_tree, JsonTreeColors, JsonTreeState, PathSegment,
+};
 use crate::util::bindings::keybinding_name_to_keystroke;
 use crate::view_components::action_button::{ButtonSize, KeystrokeSource, NakedTheme};
 use crate::view_components::compactible_action_button::{
@@ -271,6 +276,13 @@ pub enum RequestedCommandViewAction {
         path: Vec<PathSegment>,
         tree: McpTree,
     },
+    /// Write the given JSON text to the system clipboard.
+    ///
+    /// Dispatched by the "Copy JSON" right-click handler on tree rows, which
+    /// runs inside an EventContext and therefore cannot call clipboard() directly.
+    CopyJsonToClipboard {
+        text: String,
+    },
 }
 
 pub struct RequestedCommandView {
@@ -324,6 +336,8 @@ pub struct RequestedCommandView {
     mcp_request: Option<McpRequest>,
     mcp_request_tree_state: JsonTreeState,
     mcp_response_tree_state: JsonTreeState,
+    // Scroll state for the MCP JSON tree body, shared across renders to preserve scroll position.
+    mcp_scroll_state: ClippedScrollStateHandle,
 }
 
 impl RequestedCommandView {
@@ -561,6 +575,7 @@ impl RequestedCommandView {
             mcp_request: None,
             mcp_request_tree_state: Default::default(),
             mcp_response_tree_state: Default::default(),
+            mcp_scroll_state: Default::default(),
         }
     }
 
@@ -1519,45 +1534,168 @@ impl View for RequestedCommandView {
         }
 
         if should_render_mcp_content {
-            let command_text = self.command_text();
-            let content_text = if let Some(AIAgentActionResultType::CallMCPTool(result)) =
-                action_status
-                    .as_ref()
-                    .and_then(|status| status.finished_result().map(|result| &result.result))
-            {
-                // If we have a result, show the JSON response.
-                let result_text = match result {
-                    CallMCPToolResult::Success { result } => serde_json::to_string_pretty(result)
-                        .unwrap_or_else(|_| "Error formatting JSON".to_string()),
-                    CallMCPToolResult::Error(error) => {
-                        format!("Error: {error}")
-                    }
-                    CallMCPToolResult::Cancelled => "Tool call was cancelled".to_string(),
-                };
-                format!("{command_text}\n\nResponse: {result_text}")
-            } else if self.is_header_expanded {
-                command_text.to_string()
-            } else {
-                self.extract_mcp_tool_name(command_text)
-            };
+            let colors = JsonTreeColors::from_theme(theme);
+            let font_family = appearance.ui_font_family();
+            let tree_font_size = 12.0_f32;
 
-            let text_element = Text::new(
-                content_text,
-                appearance.monospace_font_family(),
-                appearance.monospace_font_size(),
+            let mut tree_column =
+                Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+
+            // Request section: show the tree if args are known, or a placeholder.
+            let request_section: Box<dyn Element> = if let Some(mcp_request) = &self.mcp_request {
+                let on_toggle_req: Arc<
+                    dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync,
+                > = Arc::new(|ctx, path, _depth| {
+                    ctx.dispatch_typed_action(RequestedCommandViewAction::ToggleJsonNode {
+                        path,
+                        tree: McpTree::Request,
+                    });
+                });
+                let on_copy_req: Arc<
+                    dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync,
+                > = Arc::new(|ctx, _path, value| {
+                    let text = serde_json::to_string_pretty(&value).unwrap_or_default();
+                    ctx.dispatch_typed_action(RequestedCommandViewAction::CopyJsonToClipboard {
+                        text,
+                    });
+                });
+                render_json_tree(
+                    &mcp_request.args,
+                    Some("Request"),
+                    &self.mcp_request_tree_state,
+                    &colors,
+                    on_toggle_req,
+                    on_copy_req,
+                    appearance,
+                )
+            } else {
+                let mut col = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+                col.add_child(
+                    Text::new_inline("Request".to_string(), font_family, tree_font_size)
+                        .with_color(colors.annotation)
+                        .soft_wrap(false)
+                        .finish(),
+                );
+                col.add_child(
+                    Text::new_inline("(no arguments)".to_string(), font_family, tree_font_size)
+                        .with_color(colors.annotation)
+                        .soft_wrap(false)
+                        .finish(),
+                );
+                col.finish()
+            };
+            tree_column.add_child(request_section);
+
+            // Response section: present only when a finished result exists.
+            if let Some(AIAgentActionResultType::CallMCPTool(result)) = action_status
+                .as_ref()
+                .and_then(|status| status.finished_result().map(|r| &r.result))
+            {
+                tree_column.add_child(
+                    Container::new(Empty::new().finish())
+                        .with_padding_top(8.)
+                        .finish(),
+                );
+
+                let renderable = mcp_result_to_renderable(result);
+                let response_element: Box<dyn Element> = match renderable {
+                    McpRenderable::Tree(value) => {
+                        let on_toggle_resp: Arc<
+                            dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync,
+                        > = Arc::new(|ctx, path, _depth| {
+                            ctx.dispatch_typed_action(RequestedCommandViewAction::ToggleJsonNode {
+                                path,
+                                tree: McpTree::Response,
+                            });
+                        });
+                        let on_copy_resp: Arc<
+                            dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value)
+                                + Send
+                                + Sync,
+                        > = Arc::new(|ctx, _path, value| {
+                            let text = serde_json::to_string_pretty(&value).unwrap_or_default();
+                            ctx.dispatch_typed_action(
+                                RequestedCommandViewAction::CopyJsonToClipboard { text },
+                            );
+                        });
+                        render_json_tree(
+                            &value,
+                            Some("Response"),
+                            &self.mcp_response_tree_state,
+                            &colors,
+                            on_toggle_resp,
+                            on_copy_resp,
+                            appearance,
+                        )
+                    }
+                    McpRenderable::Error(e) => {
+                        let mut col =
+                            Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+                        col.add_child(
+                            Text::new_inline("Response".to_string(), font_family, tree_font_size)
+                                .with_color(colors.annotation)
+                                .soft_wrap(false)
+                                .finish(),
+                        );
+                        col.add_child(
+                            Text::new(format!("Error: {e}"), font_family, tree_font_size)
+                                .with_color(theme.ui_error_color())
+                                .with_selectable(true)
+                                .finish(),
+                        );
+                        col.finish()
+                    }
+                    McpRenderable::Cancelled => {
+                        let mut col =
+                            Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+                        col.add_child(
+                            Text::new_inline("Response".to_string(), font_family, tree_font_size)
+                                .with_color(colors.annotation)
+                                .soft_wrap(false)
+                                .finish(),
+                        );
+                        col.add_child(
+                            Text::new_inline("Cancelled".to_string(), font_family, tree_font_size)
+                                .with_color(colors.annotation)
+                                .soft_wrap(false)
+                                .finish(),
+                        );
+                        col.finish()
+                    }
+                };
+                tree_column.add_child(response_element);
+            }
+
+            // Wrap the tree in a vertically scrollable area capped at MAX_EDITOR_HEIGHT
+            // so a deeply expanded tree doesn't push subsequent blocks off-screen.
+            let scrollable = NewScrollable::vertical(
+                SingleAxisConfig::Clipped {
+                    handle: self.mcp_scroll_state.clone(),
+                    child: Container::new(tree_column.finish())
+                        .with_horizontal_padding(INLINE_ACTION_HORIZONTAL_PADDING)
+                        .with_vertical_padding(REQUESTED_COMMAND_BODY_VERTICAL_PADDING)
+                        .finish(),
+                },
+                theme.nonactive_ui_detail().into(),
+                theme.active_ui_detail().into(),
+                warpui::elements::Fill::None,
             )
-            .with_color(blended_colors::text_main(theme, theme.background()))
-            .with_selectable(true)
+            .with_vertical_scrollbar(ScrollableAppearance::new(ScrollbarWidth::Auto, false))
+            .with_propagate_mousewheel_if_not_handled(true)
             .finish();
 
+            let constrained = ConstrainedBox::new(scrollable)
+                .with_max_height(MAX_EDITOR_HEIGHT)
+                .finish();
+
             let mcp_selected_text = self.mcp_content_selected_text.clone();
-            let selectable_text = SelectableArea::new(
+            let selectable_content = SelectableArea::new(
                 self.mcp_content_selection_handle.clone(),
                 #[allow(clippy::unwrap_used)]
                 move |selection_args, _, _| {
                     *mcp_selected_text.write().unwrap() = selection_args.selection;
                 },
-                text_element,
+                constrained,
             )
             .on_selection_updated(|ctx, _| {
                 ctx.dispatch_typed_action(RequestedCommandViewAction::SelectText);
@@ -1565,9 +1703,7 @@ impl View for RequestedCommandView {
             .finish();
 
             content.add_child(
-                Container::new(selectable_text)
-                    .with_horizontal_padding(INLINE_ACTION_HORIZONTAL_PADDING)
-                    .with_vertical_padding(REQUESTED_COMMAND_BODY_VERTICAL_PADDING)
+                Container::new(selectable_content)
                     .with_background(theme.background())
                     .with_corner_radius(CornerRadius::with_bottom(Radius::Pixels(8.)))
                     .finish(),
@@ -1721,6 +1857,10 @@ impl TypedActionView for RequestedCommandView {
                     McpTree::Response => self.mcp_response_tree_state.toggle_string(path),
                 }
                 ctx.notify();
+            }
+            RequestedCommandViewAction::CopyJsonToClipboard { text } => {
+                ctx.clipboard()
+                    .write(ClipboardContent::plain_text(text.clone()));
             }
         }
     }

@@ -20,7 +20,7 @@ use warpui::elements::{
     ConstrainedBox, CrossAxisAlignment, Empty, Flex, Hoverable, MainAxisSize, MouseStateHandle,
     ParentElement, Shrinkable, Text,
 };
-use warpui::Element;
+use warpui::{Element, EventContext};
 
 use crate::appearance::Appearance;
 
@@ -216,17 +216,19 @@ pub fn format_number(n: &serde_json::Number) -> String {
 /// - `root_label`   — optional label printed above the tree (e.g. "Request").
 /// - `state`        — current expansion state; queried on every render.
 /// - `colors`       — pre-resolved theme colors.
-/// - `on_toggle`    — called with the path of a clicked collapsible node.
-/// - `on_copy_json` — called with the path and value when "Copy JSON" is
-///                    activated via right-click on a row.
+/// - `on_toggle`    — called with the event context and path of a clicked
+///                    collapsible node. The caller should dispatch an action
+///                    (e.g. `ctx.dispatch_typed_action(...)`) to update state.
+/// - `on_copy_json` — called with the event context, path, and value when
+///                    "Copy JSON" is activated via right-click on a row.
 /// - `appearance`   — provides font families and sizes.
 pub fn render_json_tree(
     root: &serde_json::Value,
     root_label: Option<&str>,
     state: &JsonTreeState,
     colors: &JsonTreeColors,
-    on_toggle: Arc<dyn Fn(Vec<PathSegment>, usize) + Send + Sync>,
-    on_copy_json: Arc<dyn Fn(Vec<PathSegment>, serde_json::Value) + Send + Sync>,
+    on_toggle: Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync>,
+    on_copy_json: Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync>,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
     let font_family = appearance.ui_font_family();
@@ -271,8 +273,10 @@ fn render_value(
     label: Option<String>,
     state: &JsonTreeState,
     colors: &JsonTreeColors,
-    on_toggle: &Arc<dyn Fn(Vec<PathSegment>, usize) + Send + Sync>,
-    on_copy_json: &Arc<dyn Fn(Vec<PathSegment>, serde_json::Value) + Send + Sync>,
+    on_toggle: &Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync>,
+    on_copy_json: &Arc<
+        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync,
+    >,
     font_family: warpui::fonts::FamilyId,
     column: &mut Flex,
 ) {
@@ -464,8 +468,10 @@ fn render_container_node(
     label: Option<String>,
     state: &JsonTreeState,
     colors: &JsonTreeColors,
-    on_toggle: &Arc<dyn Fn(Vec<PathSegment>, usize) + Send + Sync>,
-    on_copy_json: &Arc<dyn Fn(Vec<PathSegment>, serde_json::Value) + Send + Sync>,
+    on_toggle: &Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync>,
+    on_copy_json: &Arc<
+        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync,
+    >,
     font_family: warpui::fonts::FamilyId,
     column: &mut Flex,
 ) {
@@ -543,11 +549,11 @@ fn render_container_node(
 
         let row_for_hover = row_element;
         let hoverable = Hoverable::new(state_handle, move |_| row_for_hover)
-            .on_click(move |_ctx, _app, _pos| {
-                on_toggle_clone(path_for_toggle.clone(), depth);
+            .on_click(move |ctx, _app, _pos| {
+                on_toggle_clone(ctx, path_for_toggle.clone(), depth);
             })
-            .on_right_click(move |_ctx, _app, _pos| {
-                on_copy_clone(path_for_copy.clone(), value_for_copy.clone());
+            .on_right_click(move |ctx, _app, _pos| {
+                on_copy_clone(ctx, path_for_copy.clone(), value_for_copy.clone());
             })
             .finish();
 
@@ -564,7 +570,9 @@ fn render_scalar_row(
     value_element: Box<dyn Element>,
     value_for_copy: serde_json::Value,
     colors: &JsonTreeColors,
-    on_copy_json: &Arc<dyn Fn(Vec<PathSegment>, serde_json::Value) + Send + Sync>,
+    on_copy_json: &Arc<
+        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync,
+    >,
     font_family: warpui::fonts::FamilyId,
     column: &mut Flex,
 ) {
@@ -602,8 +610,8 @@ fn render_scalar_row(
     let row_element = row.finish();
 
     let hoverable = Hoverable::new(state_handle, move |_| row_element)
-        .on_right_click(move |_ctx, _app, _pos| {
-            on_copy_clone(path_for_copy.clone(), value_for_copy.clone());
+        .on_right_click(move |ctx, _app, _pos| {
+            on_copy_clone(ctx, path_for_copy.clone(), value_for_copy.clone());
         })
         .finish();
 
