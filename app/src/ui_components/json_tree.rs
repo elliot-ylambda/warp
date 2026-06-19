@@ -9,16 +9,17 @@
 //! 2. Resolve `JsonTreeColors` from the active `WarpTheme`.
 //! 3. Call `render_json_tree` on each render pass, passing callbacks for
 //!    toggle and copy-JSON actions.
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pathfinder_color::ColorU;
 use warp_core::ui::icons::Icon;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::WarpTheme;
 use warpui::elements::{
-    ConstrainedBox, CrossAxisAlignment, Empty, Flex, Hoverable, MainAxisSize, MouseStateHandle,
-    ParentElement, Shrinkable, Text,
+    ConstrainedBox, CrossAxisAlignment, Empty, Flex, Hoverable, MainAxisSize, MouseState,
+    MouseStateHandle, ParentElement, SavePosition, Shrinkable, Text,
 };
 use warpui::{Element, EventContext};
 
@@ -74,6 +75,16 @@ pub struct JsonTreeState {
     node_expansion: HashMap<Vec<PathSegment>, bool>,
     /// Expansion state for long string values. Absent = collapsed (elided).
     string_expansion: HashMap<Vec<PathSegment>, bool>,
+    /// Per-node `MouseStateHandle`s used by the `Hoverable` elements in each
+    /// rendered row.
+    ///
+    /// WarpUI requires that `MouseStateHandle`s be created once and reused
+    /// across renders: creating `MouseStateHandle::default()` inline during
+    /// render discards the `click_count` set during `LeftMouseDown` before
+    /// `LeftMouseUp` fires, so click handlers never trigger. Storing handles
+    /// here (keyed by node path) gives each row a stable handle that persists
+    /// across re-renders triggered by `ctx.notify()`.
+    mouse_states: RefCell<HashMap<Vec<PathSegment>, MouseStateHandle>>,
 }
 
 impl JsonTreeState {
@@ -91,6 +102,17 @@ impl JsonTreeState {
     /// Returns whether the long string at `path` should be expanded.
     pub fn is_string_expanded(&self, path: &[PathSegment]) -> bool {
         self.string_expansion.get(path).copied().unwrap_or(false)
+    }
+
+    /// Returns the stable `MouseStateHandle` for the row at `path`, creating
+    /// one on first access. The handle is reused across renders so that
+    /// click-state (press → notify → re-render → release) is preserved.
+    pub fn mouse_state_for(&self, path: &[PathSegment]) -> MouseStateHandle {
+        self.mouse_states
+            .borrow_mut()
+            .entry(path.to_vec())
+            .or_insert_with(|| Arc::new(Mutex::new(MouseState::default())))
+            .clone()
     }
 
     /// Toggles the expansion state of the node at `path`.
@@ -212,23 +234,31 @@ pub fn format_number(n: &serde_json::Number) -> String {
 /// collapsible JSON tree.
 ///
 /// # Parameters
-/// - `root`         — the JSON value to render.
-/// - `root_label`   — optional label printed above the tree (e.g. "Request").
-/// - `state`        — current expansion state; queried on every render.
-/// - `colors`       — pre-resolved theme colors.
-/// - `on_toggle`    — called with the event context and path of a clicked
-///                    collapsible node. The caller should dispatch an action
-///                    (e.g. `ctx.dispatch_typed_action(...)`) to update state.
-/// - `on_copy_json` — called with the event context, path, and value when
-///                    "Copy JSON" is activated via right-click on a row.
-/// - `appearance`   — provides font families and sizes.
+/// - `root`               — the JSON value to render.
+/// - `root_label`         — optional label printed above the tree (e.g. "Request").
+/// - `state`              — current expansion state; queried on every render.
+/// - `colors`             — pre-resolved theme colors.
+/// - `position_id_prefix` — stable prefix for per-row `SavePosition` IDs used to
+///                          anchor the right-click context menu to the clicked row.
+///                          Must be unique per tree instance in the same window.
+/// - `on_toggle`          — called with the event context and path of a clicked
+///                          collapsible node. The caller should dispatch an action
+///                          (e.g. `ctx.dispatch_typed_action(...)`) to update state.
+/// - `on_copy_json`       — called with the event context, path, value, and the
+///                          anchor position ID of the row when "Copy JSON" is
+///                          activated via right-click. The anchor ID can be used to
+///                          position a context menu below the right-clicked row.
+/// - `appearance`         — provides font families and sizes.
 pub fn render_json_tree(
     root: &serde_json::Value,
     root_label: Option<&str>,
     state: &JsonTreeState,
     colors: &JsonTreeColors,
+    position_id_prefix: &str,
     on_toggle: Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync>,
-    on_copy_json: Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync>,
+    on_copy_json: Arc<
+        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value, String) + Send + Sync,
+    >,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
     let font_family = appearance.ui_font_family();
@@ -251,6 +281,7 @@ pub fn render_json_tree(
         None,
         state,
         colors,
+        position_id_prefix,
         &on_toggle,
         &on_copy_json,
         font_family,
@@ -273,9 +304,10 @@ fn render_value(
     label: Option<String>,
     state: &JsonTreeState,
     colors: &JsonTreeColors,
+    position_id_prefix: &str,
     on_toggle: &Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync>,
     on_copy_json: &Arc<
-        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync,
+        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value, String) + Send + Sync,
     >,
     font_family: warpui::fonts::FamilyId,
     column: &mut Flex,
@@ -291,6 +323,7 @@ fn render_value(
                 label,
                 state,
                 colors,
+                position_id_prefix,
                 on_toggle,
                 on_copy_json,
                 font_family,
@@ -311,6 +344,7 @@ fn render_value(
                         Some(key.clone()),
                         state,
                         colors,
+                        position_id_prefix,
                         on_toggle,
                         on_copy_json,
                         font_family,
@@ -330,6 +364,7 @@ fn render_value(
                 label,
                 state,
                 colors,
+                position_id_prefix,
                 on_toggle,
                 on_copy_json,
                 font_family,
@@ -350,6 +385,7 @@ fn render_value(
                         Some(idx.to_string()),
                         state,
                         colors,
+                        position_id_prefix,
                         on_toggle,
                         on_copy_json,
                         font_family,
@@ -366,7 +402,9 @@ fn render_value(
                 label,
                 build_string_value_text(s, colors, font_family),
                 value.clone(),
+                state,
                 colors,
+                position_id_prefix,
                 on_copy_json,
                 font_family,
                 column,
@@ -384,7 +422,9 @@ fn render_value(
                 label,
                 text,
                 value.clone(),
+                state,
                 colors,
+                position_id_prefix,
                 on_copy_json,
                 font_family,
                 column,
@@ -403,7 +443,9 @@ fn render_value(
                 label,
                 text,
                 value.clone(),
+                state,
                 colors,
+                position_id_prefix,
                 on_copy_json,
                 font_family,
                 column,
@@ -421,7 +463,9 @@ fn render_value(
                 label,
                 text,
                 value.clone(),
+                state,
                 colors,
+                position_id_prefix,
                 on_copy_json,
                 font_family,
                 column,
@@ -468,9 +512,10 @@ fn render_container_node(
     label: Option<String>,
     state: &JsonTreeState,
     colors: &JsonTreeColors,
+    position_id_prefix: &str,
     on_toggle: &Arc<dyn Fn(&mut EventContext, Vec<PathSegment>, usize) + Send + Sync>,
     on_copy_json: &Arc<
-        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync,
+        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value, String) + Send + Sync,
     >,
     font_family: warpui::fonts::FamilyId,
     column: &mut Flex,
@@ -541,11 +586,14 @@ fn render_container_node(
         // Non-interactive.
         column.add_child(row_element);
     } else {
+        let anchor_id = format!("{position_id_prefix}:row:{path:?}");
         let on_toggle_clone = on_toggle.clone();
         let path_for_toggle = path.clone();
         let on_copy_clone = on_copy_json.clone();
         let path_for_copy = path.clone();
-        let state_handle = MouseStateHandle::default();
+        let anchor_for_copy = anchor_id.clone();
+        // Stable handle keyed by path — see `JsonTreeState::mouse_state_for`.
+        let state_handle = state.mouse_state_for(&path);
 
         let row_for_hover = row_element;
         let hoverable = Hoverable::new(state_handle, move |_| row_for_hover)
@@ -553,11 +601,16 @@ fn render_container_node(
                 on_toggle_clone(ctx, path_for_toggle.clone(), depth);
             })
             .on_right_click(move |ctx, _app, _pos| {
-                on_copy_clone(ctx, path_for_copy.clone(), value_for_copy.clone());
+                on_copy_clone(
+                    ctx,
+                    path_for_copy.clone(),
+                    value_for_copy.clone(),
+                    anchor_for_copy.clone(),
+                );
             })
             .finish();
 
-        column.add_child(hoverable);
+        column.add_child(SavePosition::new(hoverable, &anchor_id).finish());
     }
 }
 
@@ -569,13 +622,17 @@ fn render_scalar_row(
     label: Option<String>,
     value_element: Box<dyn Element>,
     value_for_copy: serde_json::Value,
+    state: &JsonTreeState,
     colors: &JsonTreeColors,
+    position_id_prefix: &str,
     on_copy_json: &Arc<
-        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync,
+        dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value, String) + Send + Sync,
     >,
     font_family: warpui::fonts::FamilyId,
     column: &mut Flex,
 ) {
+    let anchor_id = format!("{position_id_prefix}:row:{path:?}");
+
     let mut row = Flex::row()
         .with_main_axis_size(MainAxisSize::Max)
         .with_cross_axis_alignment(CrossAxisAlignment::Center);
@@ -606,16 +663,23 @@ fn render_scalar_row(
     // Wrap in a Hoverable for right-click (copy JSON).
     let on_copy_clone = on_copy_json.clone();
     let path_for_copy = path.clone();
-    let state_handle = MouseStateHandle::default();
+    let anchor_for_copy = anchor_id.clone();
+    // Stable handle keyed by path — see `JsonTreeState::mouse_state_for`.
+    let state_handle = state.mouse_state_for(&path);
     let row_element = row.finish();
 
     let hoverable = Hoverable::new(state_handle, move |_| row_element)
         .on_right_click(move |ctx, _app, _pos| {
-            on_copy_clone(ctx, path_for_copy.clone(), value_for_copy.clone());
+            on_copy_clone(
+                ctx,
+                path_for_copy.clone(),
+                value_for_copy.clone(),
+                anchor_for_copy.clone(),
+            );
         })
         .finish();
 
-    column.add_child(hoverable);
+    column.add_child(SavePosition::new(hoverable, &anchor_id).finish());
 }
 
 /// Returns a fixed-width transparent spacer for the given indentation depth.

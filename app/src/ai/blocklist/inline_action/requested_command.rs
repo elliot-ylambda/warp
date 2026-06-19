@@ -17,7 +17,7 @@ use warpui::elements::{
     Align, Border, ChildAnchor, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox,
     Container, CornerRadius, CrossAxisAlignment, Dismiss, Empty, Expanded, Flex, MainAxisSize,
     MouseStateHandle, OffsetPositioning, ParentElement, PositionedElementAnchor,
-    PositionedElementOffsetBounds, Radius, SavePosition, ScrollbarWidth, SelectionHandle, Stack,
+    PositionedElementOffsetBounds, Radius, ScrollbarWidth, SelectableArea, SelectionHandle, Stack,
     Text,
 };
 use warpui::keymap::{Context, EditableBinding, FixedBinding, Keystroke};
@@ -282,9 +282,11 @@ pub enum RequestedCommandViewAction {
         text: String,
     },
     /// Opens the right-click context menu for an MCP JSON tree row, carrying
-    /// the serialized subtree JSON so "Copy JSON" can write it to the clipboard.
+    /// the serialized subtree JSON and the position anchor ID of the clicked
+    /// row so the menu can be positioned below it.
     ShowMcpContextMenu {
         json_text: String,
+        anchor_id: String,
     },
     /// Copy the currently selected MCP tree text to the clipboard.
     CopyMcpSelection,
@@ -348,6 +350,9 @@ pub struct RequestedCommandView {
     // Right-click context menu for MCP JSON tree rows (Copy / Copy JSON items).
     mcp_context_menu: ViewHandle<Menu<RequestedCommandViewAction>>,
     mcp_context_menu_open: bool,
+    // The SavePosition anchor ID of the row that was last right-clicked, used
+    // to position the context menu below the correct row.
+    mcp_context_menu_anchor_id: Option<String>,
 }
 
 impl RequestedCommandView {
@@ -603,6 +608,7 @@ impl RequestedCommandView {
             mcp_scroll_state: Default::default(),
             mcp_context_menu,
             mcp_context_menu_open: false,
+            mcp_context_menu_anchor_id: None,
         }
     }
 
@@ -742,10 +748,6 @@ impl RequestedCommandView {
 
     fn get_position_id_for_accept_split_button(prefix: &str) -> String {
         format!("RequestedCommandView-{prefix}-accept-split")
-    }
-
-    fn get_mcp_section_position_id(prefix: &str) -> String {
-        format!("RequestedCommandView-{prefix}-mcp-section")
     }
 
     pub fn is_header_expanded(&self) -> bool {
@@ -1585,11 +1587,14 @@ impl View for RequestedCommandView {
                 // writing directly to the clipboard, so the user can opt into copying
                 // only the selection or the full subtree JSON.
                 let on_copy_req: Arc<
-                    dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value) + Send + Sync,
-                > = Arc::new(|ctx, _path, value| {
+                    dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value, String)
+                        + Send
+                        + Sync,
+                > = Arc::new(|ctx, _path, value, anchor_id| {
                     let json_text = serde_json::to_string_pretty(&value).unwrap_or_default();
                     ctx.dispatch_typed_action(RequestedCommandViewAction::ShowMcpContextMenu {
                         json_text,
+                        anchor_id,
                     });
                 });
                 render_json_tree(
@@ -1597,6 +1602,7 @@ impl View for RequestedCommandView {
                     Some("Request"),
                     &self.mcp_request_tree_state,
                     &colors,
+                    &format!("{}-req", self.position_id_prefix),
                     on_toggle_req,
                     on_copy_req,
                     appearance,
@@ -1642,14 +1648,17 @@ impl View for RequestedCommandView {
                             });
                         });
                         let on_copy_resp: Arc<
-                            dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value)
+                            dyn Fn(&mut EventContext, Vec<PathSegment>, serde_json::Value, String)
                                 + Send
                                 + Sync,
-                        > = Arc::new(|ctx, _path, value| {
+                        > = Arc::new(|ctx, _path, value, anchor_id| {
                             let json_text =
                                 serde_json::to_string_pretty(&value).unwrap_or_default();
                             ctx.dispatch_typed_action(
-                                RequestedCommandViewAction::ShowMcpContextMenu { json_text },
+                                RequestedCommandViewAction::ShowMcpContextMenu {
+                                    json_text,
+                                    anchor_id,
+                                },
                             );
                         });
                         render_json_tree(
@@ -1657,6 +1666,7 @@ impl View for RequestedCommandView {
                             Some("Response"),
                             &self.mcp_response_tree_state,
                             &colors,
+                            &format!("{}-resp", self.position_id_prefix),
                             on_toggle_resp,
                             on_copy_resp,
                             appearance,
@@ -1720,20 +1730,30 @@ impl View for RequestedCommandView {
                 .with_max_height(MAX_EDITOR_HEIGHT)
                 .finish();
 
-            // SavePosition allows the context menu to be anchored below this section.
-            let mcp_section_position_id =
-                Self::get_mcp_section_position_id(&self.position_id_prefix);
+            // SelectableArea enables text drag-selection across the tree rows.
+            // Per-row Hoverables receive LeftMouseDown before SelectableArea sees it
+            // (depth-first dispatch), so click handlers are unaffected.
+            let mcp_selected_text = self.mcp_content_selected_text.clone();
+            let selectable_content = SelectableArea::new(
+                self.mcp_content_selection_handle.clone(),
+                #[allow(clippy::unwrap_used)]
+                move |selection_args, _, _| {
+                    *mcp_selected_text.write().unwrap() = selection_args.selection;
+                },
+                constrained,
+            )
+            .on_selection_updated(|ctx, _| {
+                ctx.dispatch_typed_action(RequestedCommandViewAction::SelectText);
+            })
+            .finish();
+
             content.add_child(
-                SavePosition::new(
-                    Container::new(constrained)
-                        .with_horizontal_padding(INLINE_ACTION_HORIZONTAL_PADDING)
-                        .with_vertical_padding(REQUESTED_COMMAND_BODY_VERTICAL_PADDING)
-                        .with_background(theme.background())
-                        .with_corner_radius(CornerRadius::with_bottom(Radius::Pixels(8.)))
-                        .finish(),
-                    &mcp_section_position_id,
-                )
-                .finish(),
+                Container::new(selectable_content)
+                    .with_horizontal_padding(INLINE_ACTION_HORIZONTAL_PADDING)
+                    .with_vertical_padding(REQUESTED_COMMAND_BODY_VERTICAL_PADDING)
+                    .with_background(theme.background())
+                    .with_corner_radius(CornerRadius::with_bottom(Radius::Pixels(8.)))
+                    .finish(),
             );
         }
 
@@ -1824,21 +1844,25 @@ impl View for RequestedCommandView {
         }
 
         if self.mcp_context_menu_open {
-            root_stack.add_positioned_child(
-                Dismiss::new(ChildView::new(&self.mcp_context_menu).finish())
-                    .on_dismiss(|ctx, _app| {
-                        ctx.dispatch_typed_action(RequestedCommandViewAction::CloseMcpContextMenu);
-                    })
-                    .prevent_interaction_with_other_elements()
-                    .finish(),
-                OffsetPositioning::offset_from_save_position_element(
-                    Self::get_mcp_section_position_id(&self.position_id_prefix),
-                    vec2f(0., 0.),
-                    PositionedElementOffsetBounds::WindowByPosition,
-                    PositionedElementAnchor::BottomLeft,
-                    ChildAnchor::TopLeft,
-                ),
-            );
+            if let Some(anchor_id) = &self.mcp_context_menu_anchor_id {
+                root_stack.add_positioned_child(
+                    Dismiss::new(ChildView::new(&self.mcp_context_menu).finish())
+                        .on_dismiss(|ctx, _app| {
+                            ctx.dispatch_typed_action(
+                                RequestedCommandViewAction::CloseMcpContextMenu,
+                            );
+                        })
+                        .prevent_interaction_with_other_elements()
+                        .finish(),
+                    OffsetPositioning::offset_from_save_position_element(
+                        anchor_id.as_str(),
+                        vec2f(0., 0.),
+                        PositionedElementOffsetBounds::WindowByPosition,
+                        PositionedElementAnchor::BottomLeft,
+                        ChildAnchor::TopLeft,
+                    ),
+                );
+            }
         }
 
         root_stack.finish()
@@ -1909,7 +1933,10 @@ impl TypedActionView for RequestedCommandView {
                 ctx.clipboard()
                     .write(ClipboardContent::plain_text(text.clone()));
             }
-            RequestedCommandViewAction::ShowMcpContextMenu { json_text } => {
+            RequestedCommandViewAction::ShowMcpContextMenu {
+                json_text,
+                anchor_id,
+            } => {
                 // Determine whether the Copy item should be enabled based on whether
                 // there is currently a non-empty text selection in the MCP section.
                 #[allow(clippy::unwrap_used)]
@@ -1936,6 +1963,7 @@ impl TypedActionView for RequestedCommandView {
                 self.mcp_context_menu.update(ctx, move |menu, ctx| {
                     menu.set_items(vec![copy_item, copy_json_item], ctx);
                 });
+                self.mcp_context_menu_anchor_id = Some(anchor_id.clone());
                 self.mcp_context_menu_open = true;
                 ctx.notify();
             }
