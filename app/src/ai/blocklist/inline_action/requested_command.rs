@@ -278,20 +278,17 @@ pub enum RequestedCommandViewAction {
         tree: McpTree,
     },
     /// Write the given JSON text to the system clipboard.
-    ///
-    /// Triggered from the "Copy JSON" item in the right-click context menu.
     CopyJsonToClipboard {
         text: String,
     },
-    /// Open the right-click context menu for an MCP JSON tree row, pre-loading
-    /// the subtree JSON that "Copy JSON" will write to the clipboard.
+    /// Opens the right-click context menu for an MCP JSON tree row, carrying
+    /// the serialized subtree JSON so "Copy JSON" can write it to the clipboard.
     ShowMcpContextMenu {
         json_text: String,
     },
-    /// Copy the currently selected text in the MCP JSON tree to the clipboard.
-    /// Used by the "Copy" item in the right-click context menu.
+    /// Copy the currently selected MCP tree text to the clipboard.
     CopyMcpSelection,
-    /// Dismiss the MCP JSON tree right-click context menu without taking action.
+    /// Dismiss the MCP JSON tree right-click context menu.
     CloseMcpContextMenu,
 }
 
@@ -1752,6 +1749,10 @@ impl View for RequestedCommandView {
                 )
                 .finish(),
             );
+        }
+
+        if let Some(footer) = self.maybe_render_footer(app) {
+            content.add_child(Clipped::new(footer).finish());
         }
 
         let border_color = if action_status
