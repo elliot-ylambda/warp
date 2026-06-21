@@ -158,6 +158,7 @@ jobs:
       - uses: ./.github/actions/prepare_environment
         with:
           target_os: macos
+          cache_key: ${{ matrix.arch }}
           is_self_hosted: false
           ref: ${{ needs.prepare_release.outputs.release_branch }}
           install_release_deps: true
@@ -425,6 +426,7 @@ jobs:
       - uses: ./.github/actions/prepare_environment
         with:
           target_os: macos
+          cache_key: ${{ matrix.arch }}
           is_self_hosted: false
           ref: ${{ needs.prepare_release.outputs.release_branch }}
           install_release_deps: true
