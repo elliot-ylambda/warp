@@ -8,7 +8,7 @@ Linear: [REMOTE-1973](https://linear.app/warpdotdev/issue/REMOTE-1973)
 - Missing, duplicated, stale, or out-of-order lifecycle evidence must not panic, corrupt a finished block or prompt grid, lose preserved command/output, create phantom blocks, repeat once-per-block side effects, or leave Warp permanently stuck in an executing state.
 - When completion metadata supplied by `Precmd` permits recovery, Warp preserves the shell-provided exit code and exact next-block identity while applying prompt metadata only to the corresponding fresh prompt block.
 - A novel completion is treated as evidence that the active command executed, even when Warp missed submission or `Preexec` evidence.
-- Duplicate, colliding, malformed, or otherwise unsupported lifecycle evidence is handled conservatively without overwriting trustworthy state or fabricating completion evidence.
+- Duplicate, colliding, malformed, or otherwise unsupported lifecycle evidence is handled conservatively without overwriting trustworthy state or fabricating completion evidence. In particular, any correlated or prompt-only `Precmd` received after the active block has already reached `AtPrompt` is ignored with diagnostics.
 - Version-skewed shared sessions preserve normal prompt flow when possible; a prompt-only or malformed `Precmd` must never complete or advance a block or fall through to the existing unsafe mutation path.
 
 ## Context
@@ -67,7 +67,7 @@ The private lifecycle module owns these core types:
 - `PreexecObservation`: classifies whether a repeated execution-start command agrees with the active command without retaining command text.
 - `LifecycleInput`: payload-light evidence for `StartCommand`, `Preexec`, `CommandFinished`, `PrecmdWithCompletionMetadata`, `PromptOnlyPrecmd`, `InitShell`, and terminal exit.
 - `LifecycleSnapshot`: immutable live evidence including active block ID/session, block state, started/finished/received-`Precmd`/in-band flags, bootstrap stage, alt-screen state, and hook session.
-- `LifecycleAction`: exhaustive planned operations: `StartActiveBlock`, `ApplyPreexec`, `AcceptCommandFinished`, `ReconcileCompletionThenApplyPrecmd`, `ApplyPrecmd`, `RefreshPrecmd`, `BeginEpoch`, `Terminate`, and `Ignore`.
+- `LifecycleAction`: exhaustive planned operations: `StartActiveBlock`, `ApplyPreexec`, `AcceptCommandFinished`, `ReconcileCompletionThenApplyPrecmd`, `ApplyPrecmd`, `BeginEpoch`, `Terminate`, and `Ignore`.
 - `LifecycleTransition`: previous phase, next phase, action, and optional recovery record.
 - `LifecycleRecoveryRecord`: structured non-UGC diagnostic data for a non-normal transition, including whether completion evidence came from `CommandFinished` or `Precmd`.
 - `BlockLifecycleCoordinator`: current phase, lifecycle epoch, and per-terminal transition rate limiter.
@@ -78,7 +78,7 @@ Planning is a pure exhaustive match over phase, snapshot, and input. `TerminalMo
 Completion identity is evaluated before the phase-specific matrix:
 
 - `CommandFinished` with a next block ID equal to the active block is a duplicate and is ignored.
-- `Precmd` with a next block ID equal to the active block applies prompt metadata when the block is fresh or replaces the active prompt and context with the newer payload when it already received `Precmd`. If its exit code disagrees with the already-completed previous block, record the mismatch without re-finishing or overwriting the block.
+- `Precmd` with a next block ID equal to the active block applies prompt metadata only when the block is fresh and awaiting its first prompt. If the active block already received `Precmd`, ignore the repeated evidence. If its exit code disagrees with the already-completed previous block, record the mismatch without re-finishing or overwriting the block.
 - Completion metadata whose next block ID belongs to a non-active existing block is stale/colliding and is ignored.
 - Completion metadata with a novel next block ID treats an unfinished active block as having executed and completes it using the provided exit code, or advances past an already-finished active block without re-finishing it. Completion evidence is sufficient to choose `DoneWithExecution` even when Warp did not observe submission or `Preexec`. It creates that exact next block and—when the evidence came from `Precmd`—applies prompt metadata to it.
 
@@ -160,9 +160,9 @@ At the parser boundary, classify both JSON and key-value `Precmd` payloads:
 
 Keep `CompletionMetadata` non-optional inside canonical `PrecmdValue`. Add a separate prompt-only handler callback for the internal prompt-only event, and extract its registered session from `PromptMetadata.session_id`.
 
-Prompt-only compatibility exists specifically for meaningful client-version skew, primarily a newer shared-session viewer parsing raw PTY hooks from an older sharer. A prompt-only `Precmd` may apply prompt metadata to a fresh block in `AwaitingPrecmd` after an accepted `CommandFinished`, or replace the current prompt in `AtPrompt`. In `Submitted`, `Executing`, or `Unknown`, it is ignored with diagnostics because it cannot prove completion or identify the next block. It never completes or advances a block. This preserves normal cross-version prompt flow without attempting to emulate unsafe older behavior during the rare overlap of version skew and an exceptional lifecycle sequence.
+Prompt-only compatibility exists specifically for meaningful client-version skew, primarily a newer shared-session viewer parsing raw PTY hooks from an older sharer. A prompt-only `Precmd` may apply prompt metadata to a fresh block in `AwaitingPrecmd` after an accepted `CommandFinished`. In `AtPrompt`, `Submitted`, `Executing`, or `Unknown`, it is ignored with diagnostics because it cannot prove completion, identify the next block, or safely identify prompt content that should be replaced. It never completes or advances a block. This preserves normal cross-version prompt flow without attempting to emulate unsafe older behavior during the rare overlap of version skew and an exceptional lifecycle sequence.
 
-Add `PrecmdDisposition::{AppliedToFreshBlock, RefreshedActivePrompt}` to `HandlerEvent::Precmd` so downstream session/environment tracking can distinguish a normal once-per-block prompt event from a replacement of the current active prompt.
+Keep `HandlerEvent::Precmd` as a normal once-per-block prompt event. Ignored repeated `Precmd` evidence must not emit another downstream prompt event.
 
 ### 3. Centralize lifecycle application in `TerminalModel`
 
@@ -173,7 +173,6 @@ Add private helpers near the ANSI handler implementation:
 - `apply_lifecycle_transition` exhaustively executes the action, emits recovery diagnostics, and commits the next phase.
 - `complete_command` is the only finalization pipeline and consumes `CompletionMetadata` from either hook.
 - `apply_precmd_to_fresh_block` passes only `PromptMetadata` into the normal prompt-ready path.
-- `refresh_current_prompt` replaces the active prompt and context from newer repeated-`Precmd` evidence without once-per-block completion mutations.
 
 Rewrite `TerminalModel`'s `command_finished`, `precmd_with_completion_metadata`, `prompt_only_precmd`, and `preexec` handlers to plan before mutation. Accepted lifecycle hooks always target `BlockList` rather than using `delegate!`, even when the alternate screen is active; unrelated ANSI behavior continues using existing delegation.
 
@@ -186,7 +185,7 @@ Rewrite `TerminalModel`'s `command_finished`, `precmd_with_completion_metadata`,
 5. Emit the ordered shared-session completion event.
 6. Emit `HandlerEvent::CommandFinished` so controller state clears.
 
-When `Precmd.completion_metadata.next_block_id` is novel, run `complete_command` with its real completion metadata, then apply the received prompt metadata to the newly created block. When its next block ID is already active, apply or replace the current prompt without completing again. This ordering prevents the received prompt from touching the completed block.
+When `Precmd.completion_metadata.next_block_id` is novel, run `complete_command` with its real completion metadata, then apply the received prompt metadata to the newly created block. When its next block ID is already active, apply the prompt only if the active block is still awaiting its first prompt; otherwise ignore the repeated evidence without completing or mutating prompt state. This ordering prevents the received prompt from touching the completed block.
 
 Change all `TerminalModel::start_command_execution*` variants to return `StartCommandOutcome`. Attach AI/environment/shared metadata, emit ordered shared-session start events, set controller executing state, and write PTY bytes only for `Accepted`. Route the in-band before-write callback through a lifecycle-aware `TerminalModel::start_in_band_command_execution` instead of calling `BlockList::start_active_block_for_in_band_command` directly.
 
@@ -201,9 +200,8 @@ Add:
 - `ensure_active_block_executing_for_completion` for the minimal preexec-equivalent transition required before completing a submitted/unknown unfinished block as `DoneWithExecution`.
 - `advance_from_finished_active` for a novel completion that must not finish the old block twice.
 - `apply_precmd_to_active(PromptMetadata)` for the normal once-per-block path, including cached populated in-band prompt-metadata substitution.
-- `refresh_active_prompt(PromptMetadata)` for repeated prompt-ready evidence.
 
-Add `Block::refresh_prompt` beside `Block::precmd`. It replaces prompt and context fields from the newest `PromptMetadata`, including rebuilding the active PS1/RPROMPT presentation rather than appending into its existing contents. It must preserve any current command/input content and cursor position in the combined prompt-and-command grid. It preserves `BlockState::BeforeExecution` and `PrecmdState::AfterPrecmd`, does not touch a finished prior block, does not complete or create a block, and does not repeat once-per-block `BlockMetadataReceived`/completion events. A changed CWD continues to emit `BlockWorkingDirectoryUpdated`.
+Do not add prompt-refresh mutation primitives for repeated `Precmd`. Once the active block has reached `AtPrompt`, retaining its existing prompt, context, command/input content, and cursor position is safer than attempting to identify and replace a possibly stale prompt region.
 
 Keep `ansi::Handler::precmd_with_completion_metadata(PrecmdValue)` as the callback for a `Precmd` with completion metadata and add `prompt_only_precmd` for the internal prompt-only event; stop delegating either below `TerminalModel`. Add direct `PromptMetadata`-accepting helpers for `BlockList`, `Block`, and `HeaderGrid`; change `BlockList`'s cached/last-populated prompt payloads and session-restoration construction to use `PromptMetadata`. Completion metadata is consumed and removed at the `TerminalModel` lifecycle boundary before prompt metadata reaches block mutation code.
 
@@ -243,7 +241,7 @@ Deliver in sequential reviewable slices:
 2. Add flattened `CompletionMetadata`, split reusable `PromptMetadata` from the wire `PrecmdValue`, classify `WithCompletionMetadata`/`PromptOnly`/malformed `Precmd`, and add protocol serialization/parsing tests without changing block behavior.
 3. Centralize normal lifecycle mutations behind focused `TerminalModel`, `BlockList`, and `Block` helpers with normal-flow parity.
 4. Add `BlockLifecycleCoordinator`, telemetry, phase reconciliation, start rejection/coalescing, and unconditional safety rules; keep state-mutating recovery disabled.
-5. Add repeated-`Precmd` refresh and safe prompt-only handling.
+5. Add conservative repeated-`Precmd` no-op handling and safe prompt-only handling.
 6. Add completion reconciliation from `Precmd` with completion metadata and shared-session recovery; gate state-mutating non-normal recovery actions behind `TerminalLifecycleRecovery`.
 7. Enable recovery actions for dev/dogfood while keeping them disabled in production.
 
@@ -287,7 +285,7 @@ Add `TerminalModel` regression coverage for:
 
 Update `out_of_order_precmd_pty_hook_cannot_restore_cursor_outside_finished_header_grid` to assert that recovery seals the old block once with the real exit code supplied by `Precmd`, creates the specified fresh block, applies prompt metadata only to the fresh block, and does not panic.
 
-Capture terminal and handler events to assert exact side effects: one `BlockCompleted`, one `AfterBlockCompleted`, one `BlockMetadataReceived` for the fresh block, one command-finished handler event, one prompt handler event, alt-screen/bracketed-paste cleanup, background finalization, and in-band decrement. Repeated prompt refresh must replace the active prompt with the newest payload, preserve current command/input content and cursor position, and emit none of the once-per-block events.
+Capture terminal and handler events to assert exact side effects: one `BlockCompleted`, one `AfterBlockCompleted`, one `BlockMetadataReceived` for the fresh block, one command-finished handler event, one prompt handler event, alt-screen/bracketed-paste cleanup, background finalization, and in-band decrement. Repeated correlated and prompt-only `Precmd` must leave the active prompt, context, current command/input content, and cursor position unchanged and emit none of the once-per-block events.
 
 ### Controller, shell protocol, and sharing
 
@@ -295,7 +293,7 @@ Capture terminal and handler events to assert exact side effects: one `BlockComp
 - Add `CompletionMetadata` serde tests proving both hook payloads use the same flat JSON keys and reject a payload with only one completion field.
 - Add `PromptMetadata` tests proving restoration and prompt-only internal paths never construct or require completion evidence.
 - Add key-value decoder tests proving it constructs canonical metadata only when both fields were populated and never supplies default completion evidence.
-- Add prompt-only `Precmd` tests proving normal prompt application/refresh remains compatible after an accepted `CommandFinished`, while prompt-only evidence in `Submitted`, `Executing`, and `Unknown` never completes or advances a block.
+- Add prompt-only `Precmd` tests proving normal first-prompt application remains compatible after an accepted `CommandFinished`, while repeated prompt-only evidence and prompt-only evidence in `Submitted`, `Executing`, and `Unknown` never mutates, completes, or advances a block.
 - Add shell-emitter tests proving zsh, bash, fish, and PowerShell send identical exit-code/next-block-ID pairs in `CommandFinished` and `Precmd`, including in-band commands.
 - Add shared-session viewer tests proving a raw `Precmd` with completion metadata reconciles to the shell-specified next block ID without an ordered-event hint.
 - Assert normal persistence, history, styling, automation, and AI-result behavior is unchanged because every completed command still has a real exit code.
@@ -318,6 +316,7 @@ Implement the slices sequentially. Reviewers can still review the protocol/schem
 
 - **The two shell-emitted metadata copies could diverge.** Allocate the exit code and next block ID once per shell prompt cycle, reuse them in both messages, and add emitter/parsing tests. Record mismatches when both events arrive.
 - **A stale prompt-ready event could be mistaken for completion.** Require a registered session and classify the supplied next block ID before mutation. A next block ID belonging to a non-active existing block is stale and ignored.
+- **Ignoring a repeated `Precmd` could discard newer prompt metadata.** Prefer the existing trustworthy `AtPrompt` state over mutating an ambiguous prompt-and-command header. A later prompt cycle will apply fresh metadata normally.
 - **Recovery could duplicate lifecycle side effects.** `CommandFinished` and `Precmd` with completion metadata share one completion pipeline; active-ID and existing-ID cases use dedicated no-refinish paths; integration tests assert exact event counts.
 - **A feature flag could cause old and new lifecycle paths to drift.** Always use the new coordinator and shared mutation helpers; the flag changes only whether a selected non-normal recovery action is applied or conservatively ignored.
 - **Internal prompt-only flows could fabricate completion evidence.** Restrict full `PrecmdValue` to the parser/`TerminalModel` boundary and use `PromptMetadata` for block mutation, prompt caching, restoration, and prompt-only tests.
