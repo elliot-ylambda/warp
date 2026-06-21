@@ -219,6 +219,7 @@ fi
 if [[ -n "$EXTRA_FEATURES" ]]; then
   FEATURES="$FEATURES,$EXTRA_FEATURES"
 fi
+export CARGO_FEATURES="$FEATURES"
 
 BUNDLE_ID="dev.warp.$APP_NAME"
 EXECUTABLE_PATH="$CARGO_TARGET_OUTPUT_DIR/$WARP_BIN"
@@ -279,7 +280,7 @@ fi
 if [[ "$ARTIFACT" == "cli" || "$ARTIFACT" == "warpctrl" ]]; then
   echo "Preparing CLI resources directory"
   BUNDLED_RESOURCES_DIR="$OUT_DIR/resources"
-  CARGO_FEATURES="$FEATURES" "$WORKSPACE_ROOT_DIR/script/prepare_bundled_resources" "$BUNDLED_RESOURCES_DIR" "$RELEASE_CHANNEL" "$CARGO_PROFILE"
+  "$WORKSPACE_ROOT_DIR/script/prepare_bundled_resources" "$BUNDLED_RESOURCES_DIR" "$RELEASE_CHANNEL" "$CARGO_PROFILE"
 fi
 
 

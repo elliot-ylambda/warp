@@ -621,7 +621,7 @@ elif [[ "$ARTIFACT" == "cli" || "$ARTIFACT" == "warpctrl" ]]; then
 
   echo "Preparing CLI resources directory"
   BUNDLED_RESOURCES_DIR="$OUT_DIR/resources"
-  "$WORKSPACE_ROOT_DIR/script/prepare_bundled_resources" "$BUNDLED_RESOURCES_DIR" "$RELEASE_CHANNEL" "$CARGO_PROFILE"
+  CARGO_FEATURES="$FEATURES" "$WORKSPACE_ROOT_DIR/script/prepare_bundled_resources" "$BUNDLED_RESOURCES_DIR" "$RELEASE_CHANNEL" "$CARGO_PROFILE"
 
 
   # Set the primary binary path to output.
