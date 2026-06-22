@@ -19230,14 +19230,23 @@ impl Workspace {
             && member_range.contains(&self.active_tab_index);
 
         let mut row = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
-        row.add_child(self.render_horizontal_tab_group_header(
-            group,
-            &mouse_states,
-            is_collapsed,
-            any_member_active,
-            appearance,
-            ctx,
-        ));
+        // The header is one flex slot, exactly like each member tab, so a
+        // long group name is cutt off within its own slot instead of stealing
+        // width from the members and making them non-uniform.
+        row.add_child(
+            Shrinkable::new(
+                1.0,
+                self.render_horizontal_tab_group_header(
+                    group,
+                    &mouse_states,
+                    is_collapsed,
+                    any_member_active,
+                    appearance,
+                    ctx,
+                ),
+            )
+            .finish(),
+        );
 
         if !is_collapsed {
             let close_button_position = if FeatureFlag::TabCloseButtonOnLeft.is_enabled() {
@@ -19363,11 +19372,11 @@ impl Workspace {
                 .name
                 .clone()
                 .unwrap_or_else(|| "New Group".to_string());
-            // Cap width so long names ellipsize and the tab bar's unbounded
-            // measurement stays finite.
+            // Cap width so long names fade out at the end (matching tabs) and the
+            // tab bar's unbounded measurement stays finite.
             ConstrainedBox::new(
                 Text::new_inline(title, font_family, 12.)
-                    .with_clip(ClipConfig::ellipsis())
+                    .with_clip(ClipConfig::end())
                     .with_color(main_text_color.into())
                     .finish(),
             )
@@ -19379,7 +19388,9 @@ impl Workspace {
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_spacing(6.)
             .with_child(icon_circle)
-            .with_child(name_element);
+            // Name takes the flexible remainder so it fades out when the header
+            // slot is tight, while the icon collage keeps its fixed size.
+            .with_child(Shrinkable::new(1.0, name_element).finish());
         // Collapsed + pinned: pin indicator to the right of the name, where an
         // ungrouped tab would show its close button. Expanded groups show the
         // pin after their last member instead.
