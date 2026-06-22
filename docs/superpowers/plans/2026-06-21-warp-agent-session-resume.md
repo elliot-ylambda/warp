@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - **Platform:** macOS only. Personal local build. No feature flag.
+- **Co-installable build:** ship as a distinct app via the **`oss` channel** (`./script/bundle -c oss` → `WarpOss.app`, bundle id `dev.warp.WarpOss`, data dir `~/.warp-oss` + `~/Library/Application Support/dev.warp.WarpOss`). This is automatically separate from the downloaded Stable Warp (`dev.warp.Warp-Stable`, `~/.warp`) — never overwrites it and never shares its session DB. Optional cosmetic rebrand to display name "Warp (Elliot)" (display-name only; keep `oss` internals so data isolation holds).
 - **Agents:** Claude Code (`claude`) + Codex CLI (`codex`).
 - **Registry path:** `~/.warp/agent-resume/<pane_uuid_hex>.json`, dir mode `0700`, files mode `0600`, atomic writes (temp + `rename`).
 - **Registry key:** lowercase hex of the pane UUID bytes — MUST byte-for-byte match `$WARP_TERMINAL_SESSION_UUID` as Warp sets it (`app/src/terminal/focus_env.rs`). Verify casing equality before relying on it.
@@ -56,7 +57,7 @@
 - [ ] **Step 1: Resolve the plumbing.** Run `rg -n "\.write_command\(" app/src` and read one existing call site to learn how a `PtyController` model handle is reached and which `ShellType` it passes. Confirm the `Bootstrapped` subscription pattern at `app/src/terminal/writeable_pty/pty_controller.rs:111-122`.
 - [ ] **Step 2: Confirm snapshot cadence.** Run `rg -n "save_pane_state|persist.*pane|snapshot" app/src/persistence app/src/app_state.rs` and trace callers. Record: does persistence run on `cmd-Q` (required — almost certainly yes, since cwd already restores) and is it periodic (determines crash coverage)? Note the answer for Task 8's README.
 - [ ] **Step 3: Hardcode the spike.** In the restore path after `TerminalPane::new(...)`, subscribe to the pane's model events and on the first non-subshell `Bootstrapped`, call `write_command("echo WARP_RESUME_SPIKE", shell_type, CommandExecutionSource::User, ctx)` once. (This is the exact skeleton Task 7 will generalize.)
-- [ ] **Step 4: Build + manual verify.** `cargo build -p app`, launch the build, open a tab, run any command, `cmd-Q`, relaunch.
+- [ ] **Step 4: Build + manual verify.** Run the local build with `./script/run` (or `cargo run`) — this launches under a non-Stable channel with its own data dir, so it never touches your downloaded Stable Warp. Open a tab, run any command, `cmd-Q`, relaunch.
   Expected: the restored tab auto-runs `echo WARP_RESUME_SPIKE` after the shell boots.
 - [ ] **Step 5: Commit the spike** (on the branch; Task 7 replaces the hardcode).
 
@@ -769,10 +770,61 @@ git commit -m "feat(agent-resume): installer + e2e docs"
 
 ---
 
+## Task 9: Build + brand the co-installable app
+
+**Files:**
+- Create: `tools/agent-resume/build-app.sh` (wrapper around `./script/bundle -c oss` + cosmetic rebrand)
+
+**Interfaces:**
+- Consumes: Tasks 0–8 merged onto the build branch (the resume feature is compiled into the `oss` bundle).
+
+- [ ] **Step 1: One-time setup.** Run `./script/bootstrap` (installs bundling deps; idempotent).
+
+- [ ] **Step 2: Bundle the oss channel.**
+
+```bash
+./script/bundle -c oss
+# Produces WarpOss.app (bundle id dev.warp.WarpOss). Note the output dir it prints.
+```
+
+- [ ] **Step 3 (optional cosmetic): rebrand display name.** Set the Finder/Dock display name without touching the bundle id or channel (so data isolation is preserved). In `build-app.sh`, after bundling:
+
+```bash
+APP="$(find . -name 'WarpOss.app' -maxdepth 4 | head -1)"
+/usr/bin/plutil -replace CFBundleDisplayName -string "Warp (Elliot)" "$APP/Contents/Info.plist"
+# Optional: swap the icon via ./script/compile_icon and copy into $APP/Contents/Resources.
+```
+
+- [ ] **Step 4: Install + verify co-installation.**
+
+```bash
+cp -R "$APP" /Applications/
+```
+Expected: both the downloaded **Warp** and your build appear as distinct apps in `/Applications` and Launchpad. Launch your build from Applications.
+
+- [ ] **Step 5: Verify data isolation.** Confirm your build uses separate state and never touched production:
+
+```bash
+ls -d ~/.warp-oss ~/Library/Application\ Support/dev.warp.WarpOss   # your build
+ls -d ~/.warp                                                       # production, untouched
+```
+Expected: your build's dirs exist and are distinct from `~/.warp`.
+
+- [ ] **Step 6: Full E2E in the installed app.** In your installed build, run the Task 8 Step 4 scenario (3 tabs, same repo, 2× claude + 1× codex, `cmd-Q`, relaunch) and confirm each tab auto-resumes its own session.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add tools/agent-resume/build-app.sh
+git commit -m "feat(agent-resume): build script for co-installable WarpOss app"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:**
-- Registry contract → Task 1. Claude capture → Task 2. Codex capture → Task 3. Rust reader → Task 4. Persist field/DB → Task 5. Snapshot population → Task 6. Replay on Bootstrapped → Task 7. Install + E2E + cadence verification → Task 8. Edge cases (continue/picker passthrough, outside-pane no-op, idempotent remove, recursion guard) → Tasks 1–3. ✅ All spec sections map to a task.
+- Registry contract → Task 1. Claude capture → Task 2. Codex capture → Task 3. Rust reader → Task 4. Persist field/DB → Task 5. Snapshot population → Task 6. Replay on Bootstrapped → Task 7. Install + E2E + cadence verification → Task 8. Co-installable branded build (data-isolated from production) → Task 9. Edge cases (continue/picker passthrough, outside-pane no-op, idempotent remove, recursion guard) → Tasks 1–3. ✅ All spec sections map to a task.
 
 **Placeholder scan:** No "TBD/TODO". The one genuine unknown — the gpui `PtyController` handle path + `Bootstrapped` subscription — is de-risked up front by the Task 0 spike (`rg`-driven, with the exact APIs), and Task 7 only swaps the hardcoded string for the snapshot field. Task 6's harness setup delegates to "copy the existing assertion pattern" with the exact search command — required because the integration harness idioms must come from live code, not fabrication.
 
