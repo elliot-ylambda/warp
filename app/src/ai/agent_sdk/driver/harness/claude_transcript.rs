@@ -257,28 +257,24 @@ pub(crate) fn rehydrate_claude_transcript(
     })
 }
 
-/// Subdirectory under `~/.claude/projects/` used when rehydrating transcripts from remote
-/// cloud runs for local continuation. Cloud resume uses per-project directories derived from
-/// the working directory; local continuation uses this fixed directory so the storage path
-/// is independent of the user's local cwd.
-pub(crate) const REMOTE_SESSIONS_DIR: &str = "remote-sessions";
-
-/// Write a [`ClaudeTranscriptEnvelope`] to the fixed `remote-sessions/` project directory
-/// under the Claude config root.
+/// Write a [`ClaudeTranscriptEnvelope`] to a project directory derived from `storage_cwd`,
+/// without mutating `envelope.cwd`.
 ///
-/// Used by the local continuation path so the storage location is independent of the user's
-/// local working directory. Cloud resume uses [`write_envelope`] with a per-project path
-/// derived from the working directory instead.
+/// Used by the local continuation path so the transcript's recorded working directory
+/// (the original cloud cwd) is preserved as-is while the file is placed under
+/// `~/.claude/projects/<encoded(storage_cwd)>/` where Claude's per-project lookup can find it.
+/// Cloud resume uses [`write_envelope`] instead, which derives the path from `envelope.cwd`.
 ///
 /// Creates:
-/// - `<config_root>/projects/remote-sessions/<uuid>.jsonl` — main transcript
-/// - `<config_root>/projects/remote-sessions/<uuid>/subagents/<stem>.jsonl` — subagents
+/// - `<config_root>/projects/<encoded(storage_cwd)>/<uuid>.jsonl` — main transcript
+/// - `<config_root>/projects/<encoded(storage_cwd)>/<uuid>/subagents/<stem>.jsonl` — subagents
 /// - `<config_root>/todos/<stem>.json` — per-agent todo lists (same location as cloud resume)
 pub(crate) fn write_envelope_for_local_continuation(
     envelope: &ClaudeTranscriptEnvelope,
+    storage_cwd: &Path,
     config_root: &Path,
 ) -> Result<()> {
-    let projects_dir = config_root.join("projects").join(REMOTE_SESSIONS_DIR);
+    let projects_dir = config_root.join("projects").join(encode_cwd(storage_cwd));
     create_dir_all(&projects_dir)
         .with_context(|| format!("Failed to create {}", projects_dir.display()))?;
 
@@ -316,72 +312,13 @@ pub(crate) fn write_envelope_for_local_continuation(
     Ok(())
 }
 
-/// Upsert an entry for `session_uuid` into `<config_root>/sessions-index.json` pointing at
-/// the `remote-sessions/` project directory.
-///
-/// Used by the local continuation path. The `cwd` field is intentionally omitted because
-/// there is no meaningful local path to record for a session downloaded from a cloud run.
-/// Claude's `--resume <uuid>` lookup uses `transcriptPath` as the authoritative source.
-pub(crate) fn write_session_index_entry_for_local_continuation(
-    session_uuid: Uuid,
-    config_root: &Path,
-) -> Result<()> {
-    let index_path = config_root.join(SESSIONS_INDEX_FILENAME);
-
-    let mut index: serde_json::Map<String, Value> = match std::fs::read_to_string(&index_path) {
-        Ok(content) => match serde_json::from_str::<Value>(&content) {
-            Ok(Value::Object(map)) => map,
-            Ok(_) => {
-                safe_warn!(
-                    safe: ("sessions-index.json is not a JSON object; overwriting"),
-                    full: ("sessions-index.json at {} is not a JSON object; overwriting", index_path.display())
-                );
-                serde_json::Map::new()
-            }
-            Err(e) => {
-                safe_warn!(
-                    safe: ("Failed to parse sessions-index.json; overwriting"),
-                    full: ("Failed to parse sessions-index.json at {}: {e}; overwriting", index_path.display())
-                );
-                serde_json::Map::new()
-            }
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
-        Err(e) => {
-            return Err(
-                anyhow::Error::from(e).context(format!("Failed to read {}", index_path.display()))
-            );
-        }
-    };
-
-    let transcript_path = format!("projects/{REMOTE_SESSIONS_DIR}/{session_uuid}.jsonl");
-    let entry = serde_json::json!({
-        "sessionId": session_uuid.to_string(),
-        "projectPath": REMOTE_SESSIONS_DIR,
-        "transcriptPath": transcript_path,
-    });
-    index.insert(session_uuid.to_string(), entry);
-
-    if let Some(parent) = index_path.parent() {
-        create_dir_all(parent)
-            .with_context(|| format!("Failed to create {}", parent.display()))?;
-    }
-    write(
-        &index_path,
-        serde_json::to_vec_pretty(&Value::Object(index))
-            .context("Failed to serialize sessions-index.json")?,
-    )
-    .with_context(|| format!("Failed to write {}", index_path.display()))?;
-    Ok(())
-}
-
 /// Rehydrate a Claude transcript downloaded from a remote cloud run for local continuation.
 ///
 /// Unlike [`rehydrate_claude_transcript`] (used by the cloud resume harness runner), this
-/// function does **not** mutate the envelope's `cwd` field — the remote session's working
-/// directory is preserved as-is in the transcript. The session file is placed under
-/// `~/.claude/projects/remote-sessions/` so the storage path is independent of the user's
-/// local working directory.
+/// function does **not** mutate the envelope's `cwd` field — the remote session's original
+/// working directory is preserved as-is in the transcript. The session file is stored under
+/// `~/.claude/projects/<encoded(home_dir)>/` so Claude's per-project session lookup finds it
+/// when the user runs `claude --resume <uuid>` from their home directory.
 pub(crate) fn rehydrate_claude_transcript_from_reader(
     reader: impl Read,
 ) -> Result<ClaudeLocalContinuation> {
@@ -389,9 +326,11 @@ pub(crate) fn rehydrate_claude_transcript_from_reader(
         serde_json::from_reader(reader).context("Failed to parse Claude transcript envelope")?;
     let session_id = envelope.uuid;
     let config_root = claude_config_dir().context("Failed to resolve Claude config dir")?;
-    write_envelope_for_local_continuation(&envelope, &config_root)
+    let home_dir = home_dir_for_claude_config()
+        .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
+    write_envelope_for_local_continuation(&envelope, &home_dir, &config_root)
         .context("Failed to rehydrate Claude transcript for local continuation")?;
-    if let Err(e) = write_session_index_entry_for_local_continuation(session_id, &config_root) {
+    if let Err(e) = write_session_index_entry(session_id, &home_dir, &config_root) {
         log::warn!("Failed to update Claude sessions-index.json: {e:#}");
     }
     Ok(ClaudeLocalContinuation {
