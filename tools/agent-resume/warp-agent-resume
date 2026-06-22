@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DIR="${WARP_AGENT_RESUME_DIR:-$HOME/.warp/agent-resume}"
+
+json_escape() { # escape backslash and double-quote for JSON string body
+  local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "$s"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  write)
+    uuid="$1"; command_str="$2"; cwd="$3"
+    [[ -n "$uuid" ]] || { echo "write: empty uuid" >&2; exit 2; }
+    mkdir -p "$DIR"; chmod 700 "$DIR"
+    tmp="$DIR/$uuid.json.tmp.$$"
+    printf '{ "command": "%s", "cwd": "%s" }\n' \
+      "$(json_escape "$command_str")" "$(json_escape "$cwd")" > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$DIR/$uuid.json"
+    ;;
+  remove)
+    uuid="$1"
+    rm -f "$DIR/$uuid.json"
+    ;;
+  *)
+    echo "usage: warp-agent-resume {write <uuid> <command> <cwd>|remove <uuid>}" >&2
+    exit 2
+    ;;
+esac
