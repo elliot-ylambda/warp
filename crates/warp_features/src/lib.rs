@@ -885,6 +885,10 @@ pub enum FeatureFlag {
     /// prompt history (in addition to shell command history). Still in
     /// development, so enabled only for dev/dogfood builds.
     NldPromptHistoryMatch,
+
+    /// Shows a warning in the agent view when the active conversation's
+    /// provider-side prompt cache has expired.
+    PromptCacheExpiryWarning,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -952,6 +956,8 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::RestorePromptOnInlineModelSelectorSearch,
     FeatureFlag::WarpControlCli,
     FeatureFlag::NldPromptHistoryMatch,
+    FeatureFlag::PromptCacheExpiryWarning,
+    FeatureFlag::PinnedTabs,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).

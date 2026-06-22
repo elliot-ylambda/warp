@@ -501,6 +501,8 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::GeminiEnterprise,
         #[cfg(feature = "nld_prompt_history_match")]
         FeatureFlag::NldPromptHistoryMatch,
+        #[cfg(feature = "prompt_cache_expiry_warning")]
+        FeatureFlag::PromptCacheExpiryWarning,
     ]);
 
     flags
