@@ -873,8 +873,13 @@ impl Network {
 
         let update = InputUpdate { id, ops };
         if matches!(self.stage, Stage::JoinedSuccessfully) {
-            if let Err(e) = self.ws_proxy_tx.try_send(UpstreamMessage::UpdateInput(update)) {
-                log::warn!("Failed to send input update over ws_proxy channel in viewer network: {e}");
+            if let Err(e) = self
+                .ws_proxy_tx
+                .try_send(UpstreamMessage::UpdateInput(update))
+            {
+                log::warn!(
+                    "Failed to send input update over ws_proxy channel in viewer network: {e}"
+                );
             }
         } else {
             // Not connected; buffer the update to be flushed on reconnect.
@@ -983,7 +988,10 @@ impl Network {
     /// Sends all input updates buffered during disconnection to the server, then clears the buffer.
     fn flush_pending_input_updates_to_server(&mut self) {
         for update in self.pending_input_updates.drain(..) {
-            if let Err(e) = self.ws_proxy_tx.try_send(UpstreamMessage::UpdateInput(update)) {
+            if let Err(e) = self
+                .ws_proxy_tx
+                .try_send(UpstreamMessage::UpdateInput(update))
+            {
                 log::warn!(
                     "Failed to send pending input update over ws_proxy channel in viewer network: {e}"
                 );

@@ -644,8 +644,14 @@ impl Network {
 
         let update = InputUpdate { id, ops };
         if matches!(self.stage, Stage::StartedSuccessfully { .. }) {
-            if let Err(e) = self.ws_proxy_tx.try_send(UpstreamMessage::UpdateInput(update)) {
-                sharer_warn!(self, "Failed to send input update over ws_proxy channel: {e}");
+            if let Err(e) = self
+                .ws_proxy_tx
+                .try_send(UpstreamMessage::UpdateInput(update))
+            {
+                sharer_warn!(
+                    self,
+                    "Failed to send input update over ws_proxy channel: {e}"
+                );
             }
         } else {
             // Not connected; buffer the update to be flushed on reconnect.
@@ -1663,14 +1669,17 @@ impl Network {
     }
 
     /// Sends all input updates buffered during disconnection to the server, then clears the buffer.
-    /// This is more a best-effort attempt because these events are not critical - that's why they are not ordered terminal events. 
+    /// This is more a best-effort attempt because these events are not critical - that's why they are not ordered terminal events.
     /// With ordered terminal events we require an ack from the server before the client can remove them from the buffer, but we don't do that for these events.
     fn flush_pending_input_updates_to_server(&mut self) {
         // Take the updates out of self to avoid a borrow conflict with sharer_warn!, which
         // borrows all of self while drain() holds a mutable borrow on pending_input_updates.
         let updates = std::mem::take(&mut self.pending_input_updates);
         for update in updates {
-            if let Err(e) = self.ws_proxy_tx.try_send(UpstreamMessage::UpdateInput(update)) {
+            if let Err(e) = self
+                .ws_proxy_tx
+                .try_send(UpstreamMessage::UpdateInput(update))
+            {
                 sharer_warn!(
                     self,
                     "Failed to send pending input update over ws_proxy channel: {e}"
