@@ -8,7 +8,7 @@ export WARP_TERMINAL_SESSION_UUID="bb22"
 
 echo '{"session_id":"sess-77","cwd":"/tmp/repo","source":"startup"}' | bash "$HERE/codex-session-start.sh"
 f="$WARP_AGENT_RESUME_DIR/bb22.json"
-grep -q '"command": "codex resume sess-77"' "$f" || { echo "FAIL: start"; exit 1; }
+grep -q '"command": "warp_agent_resume_launch codex sess-77"' "$f" || { echo "FAIL: start"; exit 1; }
 grep -q '"cwd": "/tmp/repo"' "$f" || { echo "FAIL: cwd"; exit 1; }
 
 echo '{"session_id":"sess-77","cwd":"/tmp/repo"}' | bash "$HERE/codex-session-end.sh"
