@@ -516,6 +516,7 @@ impl PaneContent for TerminalPane {
                 active_profile_id: None,
                 conversation_ids_to_restore: vec![],
                 active_conversation_id: None,
+                on_restore_command: None,
             })
         } else if let Some(task_id) = view
             .ambient_agent_view_model()
@@ -546,6 +547,7 @@ impl PaneContent for TerminalPane {
                     active_profile_id: None,
                     conversation_ids_to_restore: vec![],
                     active_conversation_id: None,
+                    on_restore_command: None,
                 })
             }
         } else {
@@ -587,6 +589,7 @@ impl PaneContent for TerminalPane {
                 active_profile_id,
                 conversation_ids_to_restore,
                 active_conversation_id,
+                on_restore_command: crate::agent_resume::read_on_restore_command(&self.uuid),
             })
         }
     }

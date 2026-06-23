@@ -2146,6 +2146,7 @@ impl PaneGroup {
                             active_profile_id: None,
                             conversation_ids_to_restore: Vec::new(),
                             active_conversation_id: None,
+                            on_restore_command: None,
                         })
                     }
                 };
