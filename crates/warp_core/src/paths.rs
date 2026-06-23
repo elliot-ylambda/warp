@@ -267,6 +267,15 @@ fn project_dirs_for_app_id(
 /// * [`containerURLForSecurityApplicationGroupIdentifier`](https://developer.apple.com/documentation/foundation/filemanager/containerurl(forsecurityapplicationgroupidentifier:)?language=objc)
 #[cfg(target_os = "macos")]
 pub fn app_group_container_path() -> Option<PathBuf> {
+    // The app group `<APPLE_TEAM_ID>.dev.warp` belongs to official Warp builds
+    // (Stable/Preview, signed by that Apple team). Locally-built channels
+    // (oss/dev/local) are not entitled to it, and probing it — including the
+    // `tempfile_in` write-check below — triggers a recurring macOS "would like to
+    // access data from other apps" prompt that has no persistable grant. Skip it.
+    if !matches!(ChannelState::channel(), Channel::Stable | Channel::Preview) {
+        return None;
+    }
+
     use std::sync::LazyLock;
     static CONTAINER_PATH: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
         use objc2_foundation::{NSFileManager, NSString};

@@ -1664,6 +1664,26 @@ impl PaneGroup {
                     ctx,
                 );
 
+                // Auto-resume agent sessions: if this pane had a live agent session
+                // captured at snapshot time, run its resume command (e.g.
+                // `claude --resume <id>`) once the restored shell finishes bootstrapping.
+                #[cfg(feature = "local_tty")]
+                {
+                    if let Some(on_restore_command) =
+                        terminal_snapshot.on_restore_command.clone()
+                    {
+                        let manager_handle = pane_data.terminal_manager(ctx);
+                        manager_handle.update(ctx, |terminal_manager, ctx| {
+                            if let Some(manager) = terminal_manager
+                                .as_any()
+                                .downcast_ref::<local_tty::TerminalManager>()
+                            {
+                                manager.set_on_restore_command(on_restore_command, ctx);
+                            }
+                        });
+                    }
+                }
+
                 let terminal_pane_id = pane_data.terminal_pane_id();
                 let pane_id = terminal_pane_id.into();
                 pane_contents.insert(pane_id, Box::new(pane_data));
@@ -2130,6 +2150,7 @@ impl PaneGroup {
                             active_profile_id: None,
                             conversation_ids_to_restore: Vec::new(),
                             active_conversation_id: None,
+                            on_restore_command: None,
                         })
                     }
                 };

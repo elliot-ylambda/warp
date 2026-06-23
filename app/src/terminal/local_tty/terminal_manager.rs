@@ -1049,6 +1049,15 @@ impl TerminalManager {
         });
     }
 
+    /// Registers a one-shot command to run after this pane's (top-level) shell
+    /// finishes bootstrapping. Used by the restore path to replay a captured
+    /// agent-resume command in a restored pane once its shell is ready.
+    pub fn set_on_restore_command(&self, command: String, app_ctx: &mut AppContext) {
+        self.pty_controller.update(app_ctx, |pty_controller, _ctx| {
+            pty_controller.set_on_restore_command(command);
+        });
+    }
+
     /// Records the PTY throughput by emitting a metric whenever the throughput
     /// is non-zero over some time interval.
     fn record_pty_throughput(

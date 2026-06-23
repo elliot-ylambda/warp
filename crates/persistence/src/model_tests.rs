@@ -312,3 +312,22 @@ fn model_token_usage_replay_skips_non_custom_endpoint_entries() {
     };
     assert!(warp_only.to_proto_custom_endpoint_usage().is_none());
 }
+
+#[test]
+fn terminal_pane_has_on_restore_command_field() {
+    // Compile-time guarantee the column/field exist and accept Some/None.
+    let p = super::NewTerminalPane {
+        id: 0,
+        uuid: vec![1, 2, 3],
+        cwd: None,
+        is_active: false,
+        shell_launch_data: None,
+        input_config: None,
+        llm_model_override: None,
+        active_profile_id: None,
+        conversation_ids: None,
+        active_conversation_id: None,
+        on_restore_command: Some("claude --resume x".into()),
+    };
+    assert_eq!(p.on_restore_command.as_deref(), Some("claude --resume x"));
+}

@@ -1194,6 +1194,7 @@ fn save_pane_state(
                 active_conversation_id: terminal_snapshot
                     .active_conversation_id
                     .map(|id| id.to_string()),
+                on_restore_command: terminal_snapshot.on_restore_command.clone(),
             };
 
             diesel::insert_into(schema::terminal_panes::dsl::terminal_panes)
@@ -2170,6 +2171,7 @@ fn read_node(conn: &mut SqliteConnection, node: model::PaneNode) -> Result<PaneN
                         active_profile_id,
                         conversation_ids_to_restore,
                         active_conversation_id,
+                        on_restore_command: terminal_pane.on_restore_command,
                     })
                 }
                 NOTEBOOK_PANE_KIND => {
