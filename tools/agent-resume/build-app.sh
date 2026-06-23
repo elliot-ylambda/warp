@@ -10,7 +10,7 @@
 #     so the two never share session/restore state.
 #
 # Usage:
-#   ./tools/agent-resume/build-app.sh                 # name it "Warp (Elliot)"
+#   ./tools/agent-resume/build-app.sh                 # name it "Elliot's Warp"
 #   WARP_ELLIOT_NAME="My Warp" ./tools/agent-resume/build-app.sh
 #   WARP_ELLIOT_REBRAND=0 ./tools/agent-resume/build-app.sh   # keep "WarpOss"
 set -euo pipefail
@@ -24,14 +24,22 @@ APP="$(find target -maxdepth 5 -type d -name 'WarpOss.app' | head -1)"
 [[ -n "$APP" ]] || { echo "error: WarpOss.app not produced" >&2; exit 1; }
 echo "==> Built: $APP"
 
-DEST="/Applications/WarpOss.app"
+NAME="${WARP_ELLIOT_NAME:-Elliot's Warp}"
+if [[ "${WARP_ELLIOT_REBRAND:-1}" = "1" ]]; then
+  DEST="/Applications/$NAME.app"
+else
+  DEST="/Applications/WarpOss.app"
+fi
 rm -rf "$DEST"
 cp -R "$APP" "$DEST"
+# Remove a previous default-named install so we don't leave a duplicate behind.
+[[ "$DEST" != "/Applications/WarpOss.app" ]] && rm -rf "/Applications/WarpOss.app"
 
 if [[ "${WARP_ELLIOT_REBRAND:-1}" = "1" ]]; then
-  NAME="${WARP_ELLIOT_NAME:-Warp (Elliot)}"
-  # Display name only — bundle id and channel are unchanged, so data isolation holds.
+  # Cosmetic name only (Finder/Dock/Launchpad/menu bar/system dialogs). Bundle id and
+  # channel are unchanged, so data isolation (~/.warp-oss) holds.
   /usr/bin/plutil -replace CFBundleDisplayName -string "$NAME" "$DEST/Contents/Info.plist"
+  /usr/bin/plutil -replace CFBundleName        -string "$NAME" "$DEST/Contents/Info.plist"
   # Editing Info.plist invalidates the signature, so we must re-sign. Use a STABLE
   # identity (the same Apple Development cert script/macos/bundle uses), NOT ad-hoc:
   # macOS keys persisted TCC permission grants on the signing identity, so an ad-hoc
@@ -47,7 +55,7 @@ if [[ "${WARP_ELLIOT_REBRAND:-1}" = "1" ]]; then
     echo "==> WARNING: no 'Apple Development' identity in keychain; signed ad-hoc."
     echo "    macOS will re-prompt for permissions every launch. Create a signing cert to fix."
   fi
-  echo "==> Display name set to: $NAME"
+  echo "==> Named: $NAME"
 fi
 
 echo "==> Installed: $DEST"
