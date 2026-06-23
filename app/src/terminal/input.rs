@@ -407,7 +407,7 @@ const AGENT_MODE_AI_DISABLED_AUTODETECTION_DISABLED_HINT_TEXT: &str = "Run comma
 
 // Rotating hint text options for new Agent Mode conversations
 const AGENT_MODE_HINT_OPTIONS: &[&str] = &[
-    "Build anything e.g. Deploy my React app to Vercel and set up environment variables",
+    "Build anything e.g. Deploy my React app to Vercel and set up environment variable
     "Build anything e.g. Help me debug why my Python tests are failing in CI",
     "Build anything e.g. Set up a new microservice with Docker and create the deployment pipeline",
     "Build anything e.g. Find and fix the memory leak in my Node.js application",
